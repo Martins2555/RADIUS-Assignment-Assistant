@@ -12,6 +12,14 @@ function GoogleIcon() {
   )
 }
 
+function Logo() {
+  return (
+    <div className="fade-in-1 logo-pulse" style={styles.logoWrapper}>
+      <img src="/logo.png" alt="RADIUS" style={styles.logo} />
+    </div>
+  )
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [checkingSession, setCheckingSession] = useState(true)
@@ -70,7 +78,7 @@ function App() {
   if (session) {
     return (
       <div style={styles.container}>
-        <img src="/logo.png" alt="RADIUS" className="fade-in-1 logo-pulse" style={styles.logo} />
+        <Logo />
         <p className="fade-in-2" style={styles.subtitle}>Logged in as {session.user.email}</p>
         <button onClick={handleLogout} className="fade-in-3" style={styles.button}>Log Out</button>
       </div>
@@ -79,7 +87,7 @@ function App() {
 
   return (
     <div style={styles.container}>
-      <img src="/logo.png" alt="RADIUS" className="fade-in-1 logo-pulse" style={styles.logo} />
+      <Logo />
       <p className="fade-in-2" style={styles.subtitle}>All-Round Assignment and Task Assistant</p>
 
       <form onSubmit={handleAuth} className="fade-in-3" style={styles.form}>
@@ -129,7 +137,23 @@ const styles = {
     fontFamily: 'sans-serif',
     textAlign: 'center',
   },
-  logo: { width: '160px', marginBottom: '1.5rem' },
+  logoWrapper: {
+    width: '160px',
+    height: '160px',
+    borderRadius: '50%',
+    border: '3px solid #ffffff',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '1.5rem',
+    backgroundColor: '#0f0f0f',
+  },
+  logo: {
+    width: '140%',
+    height: '140%',
+    objectFit: 'cover',
+  },
   subtitle: { color: '#aaa', marginBottom: '2rem' },
   form: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '320px', gap: '0.8rem' },
   input: {
