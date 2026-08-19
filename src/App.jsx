@@ -140,7 +140,7 @@ const styles = {
   logoWrapper: {
     width: '160px',
     height: '160px',
-    borderRadius: '50%',
+    borderRadius: '16px',
     border: '3px solid #ffffff',
     overflow: 'hidden',
     display: 'flex',
@@ -150,8 +150,8 @@ const styles = {
     backgroundColor: '#0f0f0f',
   },
   logo: {
-    width: '140%',
-    height: '140%',
+    width: '100%',
+    height: '100%',
     objectFit: 'cover',
   },
   subtitle: { color: '#aaa', marginBottom: '2rem' },
