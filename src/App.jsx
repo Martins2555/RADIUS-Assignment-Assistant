@@ -1,14 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 
-function Logo() {
-  return (
-    <div style={styles.logoCircle}>
-      <span style={styles.logoLetter}>R</span>
-    </div>
-  )
-}
-
 function GoogleIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 48 48" style={{ marginRight: '10px' }}>
@@ -78,21 +70,19 @@ function App() {
   if (session) {
     return (
       <div style={styles.container}>
-        <Logo />
-        <h1 style={styles.title}>RADIUS</h1>
-        <p style={styles.subtitle}>Logged in as {session.user.email}</p>
-        <button onClick={handleLogout} style={styles.button}>Log Out</button>
+        <img src="/logo.png" alt="RADIUS" className="fade-in-1 logo-pulse" style={styles.logo} />
+        <p className="fade-in-2" style={styles.subtitle}>Logged in as {session.user.email}</p>
+        <button onClick={handleLogout} className="fade-in-3" style={styles.button}>Log Out</button>
       </div>
     )
   }
 
   return (
     <div style={styles.container}>
-      <Logo />
-      <h1 style={styles.title}>RADIUS</h1>
-      <p style={styles.subtitle}>All-Round Assignment and Task Assistant</p>
+      <img src="/logo.png" alt="RADIUS" className="fade-in-1 logo-pulse" style={styles.logo} />
+      <p className="fade-in-2" style={styles.subtitle}>All-Round Assignment and Task Assistant</p>
 
-      <form onSubmit={handleAuth} style={styles.form}>
+      <form onSubmit={handleAuth} className="fade-in-3" style={styles.form}>
         <input
           type="email"
           placeholder="Email"
@@ -114,12 +104,12 @@ function App() {
         </button>
       </form>
 
-      <button onClick={handleGoogleLogin} style={styles.googleButton}>
+      <button onClick={handleGoogleLogin} className="fade-in-3" style={styles.googleButton}>
         <GoogleIcon />
         Continue with Google
       </button>
 
-      <p style={styles.toggle} onClick={() => setIsSignUp(!isSignUp)}>
+      <p className="fade-in-3" style={styles.toggle} onClick={() => setIsSignUp(!isSignUp)}>
         {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
       </p>
 
@@ -139,18 +129,7 @@ const styles = {
     fontFamily: 'sans-serif',
     textAlign: 'center',
   },
-  logoCircle: {
-    width: '64px',
-    height: '64px',
-    borderRadius: '50%',
-    backgroundColor: '#22c55e',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: '1rem',
-  },
-  logoLetter: { fontSize: '1.8rem', fontWeight: 'bold', color: '#ffffff' },
-  title: { fontSize: '2rem', marginBottom: '0.2rem' },
+  logo: { width: '160px', marginBottom: '1.5rem' },
   subtitle: { color: '#aaa', marginBottom: '2rem' },
   form: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '320px', gap: '0.8rem' },
   input: {
