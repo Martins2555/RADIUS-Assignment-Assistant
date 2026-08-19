@@ -12,35 +12,20 @@ function GoogleIcon() {
   )
 }
 
-function Logo() {
+function Logo({ small }) {
   return (
-    <div className="fade-in-1 logo-pulse" style={styles.logoWrapper}>
+    <div className={small ? '' : 'fade-in-1 logo-pulse'} style={small ? styles.logoWrapperSmall : styles.logoWrapper}>
       <img src="/logo.png" alt="RADIUS" style={styles.logo} />
     </div>
   )
 }
 
-function App() {
-  const [session, setSession] = useState(null)
-  const [checkingSession, setCheckingSession] = useState(true)
+function AuthScreen({ onAuthed }) {
   const [isSignUp, setIsSignUp] = useState(true)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setCheckingSession(false)
-    })
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-    })
-
-    return () => listener.subscription.unsubscribe()
-  }, [])
 
   const handleAuth = async (e) => {
     e.preventDefault()
@@ -49,40 +34,17 @@ function App() {
 
     if (isSignUp) {
       const { error } = await supabase.auth.signUp({ email, password })
-      if (error) {
-        setMessage(error.message)
-      } else {
-        setMessage('Check your email to confirm your account.')
-      }
+      if (error) setMessage(error.message)
+      else setMessage('Check your email to confirm your account.')
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) {
-        setMessage(error.message)
-      }
+      if (error) setMessage(error.message)
     }
     setLoading(false)
   }
 
   const handleGoogleLogin = async () => {
     await supabase.auth.signInWithOAuth({ provider: 'google' })
-  }
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-  }
-
-  if (checkingSession) {
-    return <div style={styles.container}><p>Loading...</p></div>
-  }
-
-  if (session) {
-    return (
-      <div style={styles.container}>
-        <Logo />
-        <p className="fade-in-2" style={styles.subtitle}>Logged in as {session.user.email}</p>
-        <button onClick={handleLogout} className="fade-in-3" style={styles.button}>Log Out</button>
-      </div>
-    )
   }
 
   return (
@@ -126,6 +88,95 @@ function App() {
   )
 }
 
+function Dashboard({ session }) {
+  const [mode, setMode] = useState('calculative')
+  const [subject, setSubject] = useState('')
+  const [assignmentText, setAssignmentText] = useState('')
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    alert('Next step: this will send your assignment to the AI and break it into tasks.')
+  }
+
+  return (
+    <div style={styles.dashboardContainer}>
+      <div style={styles.topBar}>
+        <Logo small />
+        <button onClick={handleLogout} style={styles.logoutBtn}>Log Out</button>
+      </div>
+
+      <p style={styles.dashSubtitle}>Logged in as {session.user.email}</p>
+
+      <div style={styles.modeToggle}>
+        <button
+          onClick={() => setMode('calculative')}
+          style={mode === 'calculative' ? styles.modeBtnActive : styles.modeBtn}
+        >
+          Calculative
+        </button>
+        <button
+          onClick={() => setMode('non-calculative')}
+          style={mode === 'non-calculative' ? styles.modeBtnActive : styles.modeBtn}
+        >
+          Non-Calculative
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} style={styles.dashForm}>
+        <input
+          type="text"
+          placeholder="Subject (e.g. Physics, History)"
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          required
+          style={styles.input}
+        />
+        <textarea
+          placeholder="Paste your assignment here..."
+          value={assignmentText}
+          onChange={(e) => setAssignmentText(e.target.value)}
+          required
+          rows={8}
+          style={styles.textarea}
+        />
+        <button type="submit" style={styles.button}>Break Down Assignment</button>
+      </form>
+    </div>
+  )
+}
+
+function App() {
+  const [session, setSession] = useState(null)
+  const [checkingSession, setCheckingSession] = useState(true)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setCheckingSession(false)
+    })
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+
+    return () => listener.subscription.unsubscribe()
+  }, [])
+
+  if (checkingSession) {
+    return <div style={styles.container}><p>Loading...</p></div>
+  }
+
+  if (session) {
+    return <Dashboard session={session} />
+  }
+
+  return <AuthScreen />
+}
+
 const styles = {
   container: {
     minHeight: '100vh',
@@ -136,6 +187,19 @@ const styles = {
     padding: '2rem',
     fontFamily: 'sans-serif',
     textAlign: 'center',
+  },
+  dashboardContainer: {
+    minHeight: '100vh',
+    padding: '1.5rem',
+    fontFamily: 'sans-serif',
+    maxWidth: '480px',
+    margin: '0 auto',
+  },
+  topBar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '0.5rem',
   },
   logoWrapper: {
     width: '160px',
@@ -149,28 +213,59 @@ const styles = {
     marginBottom: '1.5rem',
     backgroundColor: '#0f0f0f',
   },
-  logo: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
+  logoWrapperSmall: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '10px',
+    border: '2px solid #ffffff',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0f0f0f',
+    flexShrink: 0,
   },
+  logo: { width: '100%', height: '100%', objectFit: 'cover' },
   subtitle: { color: '#aaa', marginBottom: '2rem' },
+  dashSubtitle: { color: '#888', fontSize: '0.85rem', marginBottom: '1.5rem' },
   form: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '320px', gap: '0.8rem' },
+  dashForm: { display: 'flex', flexDirection: 'column', gap: '0.8rem' },
   input: {
     padding: '0.8rem',
     borderRadius: '8px',
     border: '1px solid #333',
     backgroundColor: '#1a1a1a',
     color: '#fff',
+    fontSize: '1rem',
+  },
+  textarea: {
+    padding: '0.8rem',
+    borderRadius: '8px',
+    border: '1px solid #333',
+    backgroundColor: '#1a1a1a',
+    color: '#fff',
+    fontSize: '1rem',
+    fontFamily: 'inherit',
+    resize: 'vertical',
   },
   button: {
     padding: '0.8rem',
     borderRadius: '8px',
     border: 'none',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#22c55e',
     color: '#000',
     fontWeight: 'bold',
     cursor: 'pointer',
+    fontSize: '1rem',
+  },
+  logoutBtn: {
+    padding: '0.5rem 1rem',
+    borderRadius: '8px',
+    border: '1px solid #333',
+    backgroundColor: 'transparent',
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
   },
   googleButton: {
     marginTop: '1rem',
@@ -188,6 +283,32 @@ const styles = {
   },
   toggle: { marginTop: '1.2rem', color: '#888', cursor: 'pointer', fontSize: '0.9rem' },
   message: { marginTop: '1rem', color: '#4ade80' },
+  modeToggle: {
+    display: 'flex',
+    gap: '0.6rem',
+    marginBottom: '1.5rem',
+  },
+  modeBtn: {
+    flex: 1,
+    padding: '0.7rem',
+    borderRadius: '8px',
+    border: '1px solid #333',
+    backgroundColor: 'transparent',
+    color: '#888',
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+  },
+  modeBtnActive: {
+    flex: 1,
+    padding: '0.7rem',
+    borderRadius: '8px',
+    border: '1px solid #22c55e',
+    backgroundColor: '#22c55e',
+    color: '#000',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+  },
 }
 
 export default App
