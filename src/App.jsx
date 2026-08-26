@@ -160,18 +160,57 @@ function MessageBubble({ role, content, theme }) {
           border: isUser ? 'none' : `1px solid ${c.border}`,
         }}
       >
-        {isUser ? (
-          <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>{content}</p>
-        ) : (
-          <div style={{ lineHeight: '1.6' }} className="radius-markdown">
-            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-              {content}
-            </ReactMarkdown>
-          </div>
-        )}
+        <div style={{ lineHeight: '1.6' }} className="radius-markdown">
+          <ReactMarkdown
+            remarkPlugins={[remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            components={{
+              img: (props) => (
+                <img {...props} style={{ maxWidth: '100%', borderRadius: '10px', marginTop: '0.4rem', display: 'block' }} />
+              ),
+              p: (props) => <p {...props} style={{ margin: '0 0 0.5rem 0' }} />,
+            }}
+          >
+            {content}
+          </ReactMarkdown>
+        </div>
       </div>
     </div>
   )
+}
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onload = () => {
+        const maxDim = 1600
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width)
+            width = maxDim
+          } else {
+            width = Math.round((width * maxDim) / height)
+            height = maxDim
+          }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82)
+        const base64 = dataUrl.split(',')[1]
+        resolve({ base64, mimeType: 'image/jpeg', preview: dataUrl })
+      }
+      img.onerror = reject
+      img.src = e.target.result
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
 }
 
 function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, theme, session }) {
@@ -265,6 +304,7 @@ function Dashboard({ session }) {
   const [conversations, setConversations] = useState([])
   const [activeConversationId, setActiveConversationId] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [attachedImage, setAttachedImage] = useState(null)
 
   const c = palette[theme]
   const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
@@ -310,26 +350,41 @@ function Dashboard({ session }) {
     setSidebarOpen(false)
   }
 
-  const handleFileChange = (e) => {
-    if (e.target.files.length > 0) setFileName(e.target.files[0].name)
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setFileName(file.name)
+    try {
+      const compressed = await compressImage(file)
+      setAttachedImage(compressed)
+    } catch (err) {
+      setError('Could not process that image. Please try a different file.')
+    }
+  }
+
+  const handleRemoveImage = () => {
+    setAttachedImage(null)
+    setFileName('')
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!assignmentText.trim()) return
+    if (!assignmentText.trim() && !attachedImage) return
 
     setLoading(true)
     setError('')
 
     const userText = assignmentText
+    const imageToSend = attachedImage
     setAssignmentText('')
-    setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userText }])
+    setAttachedImage(null)
+    setFileName('')
 
     try {
       let conversationId = activeConversationId
 
       if (!conversationId) {
-        const title = userText.slice(0, 60)
+        const title = (userText || 'Image assignment').slice(0, 60)
         const { data: newConv, error: convError } = await supabase
           .from('conversations')
           .insert({ user_id: session.user.id, title, mode, subject: subject || null })
@@ -341,14 +396,42 @@ function Dashboard({ session }) {
         setConversations((prev) => [newConv, ...prev])
       }
 
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userText })
+      let imageUrl = null
+      if (imageToSend) {
+        const path = `${session.user.id}/${Date.now()}.jpg`
+        const blob = await (await fetch(`data:${imageToSend.mimeType};base64,${imageToSend.base64}`)).blob()
+        const { error: uploadError } = await supabase.storage
+          .from('assignment-images')
+          .upload(path, blob, { contentType: imageToSend.mimeType })
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from('assignment-images').getPublicUrl(path)
+          imageUrl = urlData.publicUrl
+        }
+      }
+
+      const userContent = imageUrl
+        ? `
+
+![assignment image](${imageUrl})
+
+${userText ? '\n\n' + userText : ''}`
+        : userText
+
+      setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userContent })
 
       const history = messages.map((m) => ({ role: m.role, content: m.content }))
 
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject, mode, assignmentText: userText, history }),
+        body: JSON.stringify({
+          subject,
+          mode,
+          assignmentText: userText,
+          history,
+          image: imageToSend ? { base64: imageToSend.base64, mimeType: imageToSend.mimeType } : null,
+        }),
       })
       const data = await response.json()
 
@@ -418,9 +501,22 @@ function Dashboard({ session }) {
         style={{ ...styles.subjectInput, backgroundColor: c.surface, borderColor: c.border, color: c.text }}
       />
 
+      {attachedImage && (
+        <div style={{ margin: '0 1rem 0.6rem 1rem', position: 'relative', width: '70px' }}>
+          <img src={attachedImage.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
+          <button
+            onClick={handleRemoveImage}
+            type="button"
+            style={{ position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', border: 'none', backgroundColor: '#ef4444', color: '#fff', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} style={{ ...styles.bottomBar, backgroundColor: c.surface, borderColor: c.border }}>
         <label style={styles.attachBtn}>
-          <input type="file" onChange={handleFileChange} style={{ display: 'none' }} />
+          <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
           <PlusIcon color={c.text} />
         </label>
         <input
@@ -434,7 +530,6 @@ function Dashboard({ session }) {
           <SendIcon color={c.accent} />
         </button>
       </form>
-      {fileName && <p style={{ fontSize: '0.75rem', color: c.subtext, textAlign: 'center', marginTop: '0.4rem' }}>Attached: {fileName} (not yet processed)</p>}
     </div>
   )
 }
