@@ -1,5 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabaseClient'
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 
 function GoogleIcon() {
   return (
@@ -141,6 +145,113 @@ function SettingsScreen({ session, theme, setTheme, onBack }) {
   )
 }
 
+function MessageBubble({ role, content, theme }) {
+  const c = palette[theme]
+  const isUser = role === 'user'
+  return (
+    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.7rem' }}>
+      <div
+        style={{
+          maxWidth: '85%',
+          padding: '0.7rem 1rem',
+          borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+          backgroundColor: isUser ? c.accent : c.surface,
+          color: isUser ? c.accentText : c.text,
+          border: isUser ? 'none' : `1px solid ${c.border}`,
+        }}
+      >
+        {isUser ? (
+          <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>{content}</p>
+        ) : (
+          <div style={{ lineHeight: '1.6' }} className="radius-markdown">
+            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+              {content}
+            </ReactMarkdown>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, theme, session }) {
+  const c = palette[theme]
+  if (!open) return null
+
+  return (
+    <>
+      <div onClick={onClose} style={styles.sidebarOverlay} />
+      <div style={{ ...styles.sidebarPanel, backgroundColor: c.surface, borderColor: c.border }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <Logo small />
+            <span style={{ fontWeight: 'bold', color: c.text }}>RADIUS</span>
+          </div>
+          <button onClick={onClose} style={styles.iconBtn}><BackIcon color={c.text} /></button>
+        </div>
+
+        <button onClick={onNewChat} style={{ ...styles.newChatSidebarBtn, borderColor: c.border, color: c.text }}>
+          <NewChatIcon color={c.text} />
+          New chat
+        </button>
+
+        <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 1rem 0.4rem' }}>RECENT</p>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 0.6rem' }}>
+          {conversations.length === 0 && (
+            <p style={{ color: c.subtext, fontSize: '0.85rem', padding: '0.6rem' }}>No chats yet</p>
+          )}
+          {conversations.map((conv) => (
+            <div
+              key={conv.id}
+              onClick={() => onSelectConversation(conv)}
+              style={{
+                padding: '0.7rem 0.8rem',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                backgroundColor: conv.id === activeConversationId ? c.bg : 'transparent',
+                color: c.text,
+                fontSize: '0.9rem',
+                marginBottom: '0.2rem',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {conv.title || 'New chat'}
+            </div>
+          ))}
+        </div>
+
+        <div
+          onClick={onOpenSettings}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '1rem', borderTop: `1px solid ${c.border}`, cursor: 'pointer' }}
+        >
+          <div
+            style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '50%',
+              backgroundColor: c.accent,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: c.accentText,
+              fontSize: '0.8rem',
+              fontWeight: 'bold',
+              flexShrink: 0,
+            }}
+          >
+            {(session.user.email || '?')[0].toUpperCase()}
+          </div>
+          <span style={{ color: c.text, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {session.user.email}
+          </span>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function Dashboard({ session }) {
   const [view, setView] = useState('main')
   const [theme, setTheme] = useState('dark')
@@ -148,46 +259,108 @@ function Dashboard({ session }) {
   const [subject, setSubject] = useState('')
   const [assignmentText, setAssignmentText] = useState('')
   const [fileName, setFileName] = useState('')
-  const [result, setResult] = useState('')
+  const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [conversations, setConversations] = useState([])
+  const [activeConversationId, setActiveConversationId] = useState(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const c = palette[theme]
   const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
+  const messagesEndRef = useRef(null)
+
+  useEffect(() => {
+    loadConversations()
+  }, [])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
+
+  async function loadConversations() {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id, title, mode, subject, updated_at')
+      .order('updated_at', { ascending: false })
+    if (!error) setConversations(data || [])
+  }
+
+  async function openConversation(conv) {
+    setSidebarOpen(false)
+    setActiveConversationId(conv.id)
+    setMode(conv.mode || 'calculative')
+    setSubject(conv.subject || '')
+    setError('')
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, role, content, created_at')
+      .eq('conversation_id', conv.id)
+      .order('created_at', { ascending: true })
+    if (!error) setMessages(data || [])
+  }
+
+  function handleNewChat() {
+    setActiveConversationId(null)
+    setMessages([])
+    setAssignmentText('')
+    setFileName('')
+    setError('')
+    setSubject('')
+    setSidebarOpen(false)
+  }
 
   const handleFileChange = (e) => {
     if (e.target.files.length > 0) setFileName(e.target.files[0].name)
   }
 
-  const handleNewChat = () => {
-    setAssignmentText('')
-    setFileName('')
-    setResult('')
-    setError('')
-    setSubject('')
-  }
-
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (!assignmentText.trim()) return
+
     setLoading(true)
     setError('')
-    setResult('')
+
+    const userText = assignmentText
+    setAssignmentText('')
+    setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userText }])
 
     try {
+      let conversationId = activeConversationId
+
+      if (!conversationId) {
+        const title = userText.slice(0, 60)
+        const { data: newConv, error: convError } = await supabase
+          .from('conversations')
+          .insert({ user_id: session.user.id, title, mode, subject: subject || null })
+          .select()
+          .single()
+        if (convError) throw new Error(convError.message)
+        conversationId = newConv.id
+        setActiveConversationId(conversationId)
+        setConversations((prev) => [newConv, ...prev])
+      }
+
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userText })
+
+      const history = messages.map((m) => ({ role: m.role, content: m.content }))
+
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject, mode, assignmentText }),
+        body: JSON.stringify({ subject, mode, assignmentText: userText, history }),
       })
       const data = await response.json()
 
       if (!response.ok) {
         setError(data.error || 'Something went wrong.')
       } else {
-        setResult(data.result)
+        setMessages((prev) => [...prev, { id: `temp-a-${Date.now()}`, role: 'assistant', content: data.result }])
+        await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: data.result })
+        loadConversations()
       }
     } catch (err) {
-      setError('Network error. Please try again.')
+      setError(err.message || 'Network error. Please try again.')
     }
     setLoading(false)
   }
@@ -198,8 +371,20 @@ function Dashboard({ session }) {
 
   return (
     <div style={{ ...styles.dashboardContainer, backgroundColor: c.bg, color: c.text }}>
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onSelectConversation={openConversation}
+        onNewChat={handleNewChat}
+        onOpenSettings={() => { setSidebarOpen(false); setView('settings') }}
+        theme={theme}
+        session={session}
+      />
+
       <div style={styles.topBar}>
-        <button onClick={() => setView('settings')} style={styles.iconBtn}><MenuIcon color={c.text} /></button>
+        <button onClick={() => setSidebarOpen(true)} style={styles.iconBtn}><MenuIcon color={c.text} /></button>
         <div style={styles.modeToggle}>
           <button onClick={() => setMode('calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'calculative' ? c.accent : 'transparent', color: mode === 'calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Calculative</button>
           <button onClick={() => setMode('non-calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'non-calculative' ? c.accent : 'transparent', color: mode === 'non-calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Non-Calculative</button>
@@ -207,27 +392,22 @@ function Dashboard({ session }) {
         <button onClick={handleNewChat} style={styles.iconBtn}><NewChatIcon color={c.text} /></button>
       </div>
 
-      <div style={styles.blankArea}>
-        {!assignmentText && !result && !loading && (
-          <div style={{ textAlign: 'center' }}>
+      <div style={styles.messagesArea}>
+        {messages.length === 0 && !loading && (
+          <div style={{ textAlign: 'center', margin: 'auto' }}>
             <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>Welcome, {displayName}</p>
             <p style={{ color: c.subtext, marginTop: '0.4rem' }}>What assignment are we tackling today?</p>
           </div>
         )}
 
-        {loading && (
-          <p style={{ color: c.subtext }}>Thinking through your assignment...</p>
-        )}
+        {messages.map((m) => (
+          <MessageBubble key={m.id} role={m.role} content={m.content} theme={theme} />
+        ))}
 
-        {error && (
-          <p style={{ color: '#ef4444', padding: '0 1rem', textAlign: 'center' }}>{error}</p>
-        )}
+        {loading && <p style={{ color: c.subtext, padding: '0.4rem 0' }}>Thinking through your assignment...</p>}
+        {error && <p style={{ color: '#ef4444', padding: '0.4rem 0', textAlign: 'center' }}>{error}</p>}
 
-        {result && (
-          <div style={{ ...styles.resultBox, backgroundColor: c.surface, borderColor: c.border, color: c.text }}>
-            <p style={{ whiteSpace: 'pre-wrap', margin: 0, lineHeight: '1.6' }}>{result}</p>
-          </div>
-        )}
+        <div ref={messagesEndRef} />
       </div>
 
       <input
@@ -300,18 +480,4 @@ const styles = {
   button: { padding: '0.8rem', borderRadius: '8px', border: 'none', backgroundColor: '#ffffff', color: '#000', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem' },
   googleButton: { marginTop: '1rem', padding: '0.8rem', borderRadius: '8px', border: '1px solid #333', backgroundColor: 'transparent', color: '#fff', width: '100%', maxWidth: '320px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   toggle: { marginTop: '1.2rem', color: '#888', cursor: 'pointer', fontSize: '0.9rem' },
-  message: { marginTop: '1rem', color: '#4ade80' },
-  modeToggle: { display: 'flex', gap: '0.4rem' },
-  modeBtn: { padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' },
-  blankArea: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' },
-  resultBox: { border: '1px solid', borderRadius: '12px', padding: '1rem', maxWidth: '100%', maxHeight: '60vh', overflowY: 'auto' },
-  subjectInput: { margin: '0 1rem 0.6rem 1rem', padding: '0.6rem 1rem', borderRadius: '20px', border: '1px solid', fontSize: '0.85rem', outline: 'none' },
-  bottomBar: { display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem', margin: '0 1rem 1rem 1rem', borderRadius: '30px', border: '1px solid' },
-  attachBtn: { display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.3rem' },
-  bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem' },
-  sendBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.3rem' },
-  themeBtn: { flex: 1, padding: '0.6rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
-  logoutBtn: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 'bold' },
-}
-
-export default App
+  message: { marginTop: '1rem',
