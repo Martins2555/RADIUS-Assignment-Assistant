@@ -3,7 +3,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { subject, mode, assignmentText } = req.body
+  const { subject, mode, assignmentText, history } = req.body
 
   if (!assignmentText) {
     return res.status(400).json({ error: 'Assignment text is required' })
@@ -11,12 +11,32 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.GEMINI_API_KEY
 
-  const prompt = `You are RADIUS, an assignment assistant for students. The subject is "${subject || 'unspecified'}" and the mode is "${mode}" (calculative means math/physics/engineering style problems requiring computation, non-calculative means writing/history/humanities style tasks).
+  const systemInstruction = `You are RADIUS, an assignment assistant for students. The subject is "${subject || 'unspecified'}" and the mode is "${mode}" (calculative means math/physics/engineering style problems requiring computation, non-calculative means writing/history/humanities style tasks).
 
-Break down the following assignment into a clear, numbered list of 3-6 actionable subtasks a student should follow to complete it. Be specific and practical. If it's calculative, include the key steps of the computation. If it's non-calculative, include research and structure steps.
+STRICT INSTRUCTION FOLLOWING:
+- If the student specifies a word count, length, number of points, or any other explicit constraint, you MUST follow it exactly. Count before responding. Do not pad with filler or fall short.
+- Answer precisely what was asked. Do not add unrequested sections or disclaimers.
 
-Assignment:
-${assignmentText}`
+MATH FORMATTING RULES (calculative mode):
+- Write every equation using LaTeX, wrapped in double dollar signs for display equations, e.g. $$2x + 5 = 15$$
+- Write fractions using \\frac{numerator}{denominator}, never as a slash like 2/5
+- Solve step by step, showing each algebraic manipulation as its own LaTeX line
+- Never describe math in plain prose when it can be shown as a formatted equation
+
+For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 steps) covering research and structure. For calculative mode: break the problem down and solve it fully, showing every step.`
+
+  const contents = []
+
+  if (Array.isArray(history)) {
+    for (const turn of history) {
+      contents.push({
+        role: turn.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: turn.content }],
+      })
+    }
+  }
+
+  contents.push({ role: 'user', parts: [{ text: assignmentText }] })
 
   try {
     const response = await fetch(
@@ -25,7 +45,8 @@ ${assignmentText}`
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          system_instruction: { parts: [{ text: systemInstruction }] },
+          contents,
         }),
       }
     )
