@@ -128,30 +128,15 @@ function SettingsScreen({ session, theme, setTheme, onBack }) {
         <span style={{ fontWeight: 'bold' }}>Settings</span>
         <div style={{ width: '22px' }} />
       </div>
-
       <p style={{ color: c.subtext, marginTop: '1.5rem' }}>{session.user.email}</p>
-
       <div style={{ marginTop: '2rem' }}>
         <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>APPEARANCE</p>
         <div style={{ display: 'flex', gap: '0.6rem' }}>
-          <button
-            onClick={() => setTheme('dark')}
-            style={{ ...styles.themeBtn, borderColor: theme === 'dark' ? c.accent : c.border, color: c.text }}
-          >
-            Dark
-          </button>
-          <button
-            onClick={() => setTheme('light')}
-            style={{ ...styles.themeBtn, borderColor: theme === 'light' ? c.accent : c.border, color: c.text }}
-          >
-            Light
-          </button>
+          <button onClick={() => setTheme('dark')} style={{ ...styles.themeBtn, borderColor: theme === 'dark' ? c.accent : c.border, color: c.text }}>Dark</button>
+          <button onClick={() => setTheme('light')} style={{ ...styles.themeBtn, borderColor: theme === 'light' ? c.accent : c.border, color: c.text }}>Light</button>
         </div>
       </div>
-
-      <button onClick={handleLogout} style={{ ...styles.logoutBtn, borderColor: c.border, color: '#ef4444', marginTop: '2.5rem' }}>
-        Log Out
-      </button>
+      <button onClick={handleLogout} style={{ ...styles.logoutBtn, borderColor: c.border, color: '#ef4444', marginTop: '2.5rem' }}>Log Out</button>
     </div>
   )
 }
@@ -160,8 +145,12 @@ function Dashboard({ session }) {
   const [view, setView] = useState('main')
   const [theme, setTheme] = useState('dark')
   const [mode, setMode] = useState('calculative')
+  const [subject, setSubject] = useState('')
   const [assignmentText, setAssignmentText] = useState('')
   const [fileName, setFileName] = useState('')
+  const [result, setResult] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const c = palette[theme]
   const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
@@ -173,11 +162,34 @@ function Dashboard({ session }) {
   const handleNewChat = () => {
     setAssignmentText('')
     setFileName('')
+    setResult('')
+    setError('')
+    setSubject('')
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    alert('Next step: this will send your assignment to the AI and break it into tasks.')
+    setLoading(true)
+    setError('')
+    setResult('')
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, mode, assignmentText }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        setError(data.error || 'Something went wrong.')
+      } else {
+        setResult(data.result)
+      }
+    } catch (err) {
+      setError('Network error. Please try again.')
+    }
+    setLoading(false)
   }
 
   if (view === 'settings') {
@@ -189,30 +201,42 @@ function Dashboard({ session }) {
       <div style={styles.topBar}>
         <button onClick={() => setView('settings')} style={styles.iconBtn}><MenuIcon color={c.text} /></button>
         <div style={styles.modeToggle}>
-          <button
-            onClick={() => setMode('calculative')}
-            style={{ ...styles.modeBtn, backgroundColor: mode === 'calculative' ? c.accent : 'transparent', color: mode === 'calculative' ? c.accentText : c.subtext, borderColor: c.border }}
-          >
-            Calculative
-          </button>
-          <button
-            onClick={() => setMode('non-calculative')}
-            style={{ ...styles.modeBtn, backgroundColor: mode === 'non-calculative' ? c.accent : 'transparent', color: mode === 'non-calculative' ? c.accentText : c.subtext, borderColor: c.border }}
-          >
-            Non-Calculative
-          </button>
+          <button onClick={() => setMode('calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'calculative' ? c.accent : 'transparent', color: mode === 'calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Calculative</button>
+          <button onClick={() => setMode('non-calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'non-calculative' ? c.accent : 'transparent', color: mode === 'non-calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Non-Calculative</button>
         </div>
         <button onClick={handleNewChat} style={styles.iconBtn}><NewChatIcon color={c.text} /></button>
       </div>
 
       <div style={styles.blankArea}>
-        {!assignmentText && (
+        {!assignmentText && !result && !loading && (
           <div style={{ textAlign: 'center' }}>
             <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>Welcome, {displayName}</p>
             <p style={{ color: c.subtext, marginTop: '0.4rem' }}>What assignment are we tackling today?</p>
           </div>
         )}
+
+        {loading && (
+          <p style={{ color: c.subtext }}>Thinking through your assignment...</p>
+        )}
+
+        {error && (
+          <p style={{ color: '#ef4444', padding: '0 1rem', textAlign: 'center' }}>{error}</p>
+        )}
+
+        {result && (
+          <div style={{ ...styles.resultBox, backgroundColor: c.surface, borderColor: c.border, color: c.text }}>
+            <p style={{ whiteSpace: 'pre-wrap', margin: 0, lineHeight: '1.6' }}>{result}</p>
+          </div>
+        )}
       </div>
+
+      <input
+        type="text"
+        placeholder="Subject (optional, e.g. Physics)"
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        style={{ ...styles.subjectInput, backgroundColor: c.surface, borderColor: c.border, color: c.text }}
+      />
 
       <form onSubmit={handleSubmit} style={{ ...styles.bottomBar, backgroundColor: c.surface, borderColor: c.border }}>
         <label style={styles.attachBtn}>
@@ -226,11 +250,11 @@ function Dashboard({ session }) {
           onChange={(e) => setAssignmentText(e.target.value)}
           style={{ ...styles.bottomInput, color: c.text }}
         />
-        <button type="submit" style={styles.sendBtn}>
+        <button type="submit" disabled={loading} style={styles.sendBtn}>
           <SendIcon color={c.accent} />
         </button>
       </form>
-      {fileName && <p style={{ fontSize: '0.75rem', color: c.subtext, textAlign: 'center', marginTop: '0.4rem' }}>Attached: {fileName}</p>}
+      {fileName && <p style={{ fontSize: '0.75rem', color: c.subtext, textAlign: 'center', marginTop: '0.4rem' }}>Attached: {fileName} (not yet processed)</p>}
     </div>
   )
 }
@@ -279,7 +303,9 @@ const styles = {
   message: { marginTop: '1rem', color: '#4ade80' },
   modeToggle: { display: 'flex', gap: '0.4rem' },
   modeBtn: { padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' },
-  blankArea: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' },
+  blankArea: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' },
+  resultBox: { border: '1px solid', borderRadius: '12px', padding: '1rem', maxWidth: '100%', maxHeight: '60vh', overflowY: 'auto' },
+  subjectInput: { margin: '0 1rem 0.6rem 1rem', padding: '0.6rem 1rem', borderRadius: '20px', border: '1px solid', fontSize: '0.85rem', outline: 'none' },
   bottomBar: { display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem', margin: '0 1rem 1rem 1rem', borderRadius: '30px', border: '1px solid' },
   attachBtn: { display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.3rem' },
   bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem' },
