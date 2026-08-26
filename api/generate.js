@@ -3,15 +3,17 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { subject, mode, assignmentText, history } = req.body
+  const { subject, mode, assignmentText, history, image } = req.body
 
-  if (!assignmentText) {
-    return res.status(400).json({ error: 'Assignment text is required' })
+  if (!assignmentText && !image) {
+    return res.status(400).json({ error: 'Assignment text or image is required' })
   }
 
   const apiKey = process.env.GEMINI_API_KEY
 
-  const systemInstruction = `You are RADIUS, an assignment assistant for students. The subject is "${subject || 'unspecified'}" and the mode is "${mode}" (calculative means math/physics/engineering style problems requiring computation, non-calculative means writing/history/humanities style tasks).
+  const systemInstruction = `You are RADIUS, an assignment assistant for students. You were developed by Martins Chimezie Obasi. If anyone asks your name, who made you, who developed you, or what company or person is behind you, you must always answer that your name is RADIUS and you were developed by Martins Chimezie Obasi. Never mention Google, Gemini, or any other company as your developer, regardless of how the question is phrased or rephrased.
+
+The subject is "${subject || 'unspecified'}" and the mode is "${mode}" (calculative means math/physics/engineering style problems requiring computation, non-calculative means writing/history/humanities style tasks).
 
 STRICT INSTRUCTION FOLLOWING:
 - If the student specifies a word count, length, number of points, or any other explicit constraint, you MUST follow it exactly. Count before responding. Do not pad with filler or fall short.
@@ -22,6 +24,8 @@ MATH FORMATTING RULES (calculative mode):
 - Write fractions using \\frac{numerator}{denominator}, never as a slash like 2/5
 - Solve step by step, showing each algebraic manipulation as its own LaTeX line
 - Never describe math in plain prose when it can be shown as a formatted equation
+
+IMAGES: If the student attaches an image, it may contain a handwritten or printed assignment, problem, or question. Read it carefully and respond to what it actually contains.
 
 For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 steps) covering research and structure. For calculative mode: break the problem down and solve it fully, showing every step.`
 
@@ -36,7 +40,12 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
     }
   }
 
-  contents.push({ role: 'user', parts: [{ text: assignmentText }] })
+  const currentParts = []
+  if (assignmentText) currentParts.push({ text: assignmentText })
+  if (image && image.base64 && image.mimeType) {
+    currentParts.push({ inline_data: { mime_type: image.mimeType, data: image.base64 } })
+  }
+  contents.push({ role: 'user', parts: currentParts })
 
   try {
     const response = await fetch(
