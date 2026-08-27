@@ -19,8 +19,17 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Missing authorization token' })
   }
 
+  if (!process.env.VITE_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('Missing env vars:', {
+      hasUrl: !!process.env.VITE_SUPABASE_URL,
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    })
+    return res.status(500).json({ error: 'Server misconfiguration: missing Supabase env vars' })
+  }
+
   const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(token)
   if (authError || !userData?.user) {
+    console.error('Auth check failed:', authError?.message, authError?.status, authError)
     return res.status(401).json({ error: 'Invalid or expired session' })
   }
 
