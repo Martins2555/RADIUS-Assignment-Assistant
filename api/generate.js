@@ -1,8 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseAdmin = createClient(
+// Uses the anon/publishable key — same key already used successfully by the
+// frontend for login — just to verify the incoming JWT belongs to a real,
+// logged-in user. This does not bypass RLS and does not need the secret key.
+const supabaseAuth = createClient(
   process.env.VITE_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.VITE_SUPABASE_ANON_KEY
 )
 
 export default async function handler(req, res) {
@@ -19,15 +22,15 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Missing authorization token' })
   }
 
-  if (!process.env.VITE_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_ANON_KEY) {
     console.error('Missing env vars:', {
       hasUrl: !!process.env.VITE_SUPABASE_URL,
-      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      hasAnonKey: !!process.env.VITE_SUPABASE_ANON_KEY,
     })
     return res.status(500).json({ error: 'Server misconfiguration: missing Supabase env vars' })
   }
 
-  const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(token)
+  const { data: userData, error: authError } = await supabaseAuth.auth.getUser(token)
   if (authError || !userData?.user) {
     console.error('Auth check failed:', authError?.message, authError?.status, authError)
     return res.status(401).json({ error: 'Invalid or expired session' })
