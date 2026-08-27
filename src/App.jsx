@@ -562,8 +562,8 @@ function App() {
 
 const styles = {
   container: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem', fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#0f0f0f', color: '#fff' },
-  dashboardContainer: { minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'sans-serif' },
-  settingsContainer: { minHeight: '100vh', padding: '1.2rem', fontFamily: 'sans-serif' },
+  dashboardContainer: { minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'sans-serif', maxWidth: '640px', margin: '0 auto', width: '100%' },
+  settingsContainer: { minHeight: '100vh', padding: '1.2rem', fontFamily: 'sans-serif', maxWidth: '640px', margin: '0 auto', width: '100%' },
   topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.2rem' },
   iconBtn: { background: 'none', border: 'none', cursor: 'pointer', padding: '0.3rem' },
   logoWrapper: { width: '160px', height: '160px', borderRadius: '16px', border: '3px solid #ffffff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem', backgroundColor: '#0f0f0f' },
