@@ -63,6 +63,9 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
     const data = await response.json()
 
     if (!response.ok) {
+      if (response.status === 429) {
+        return res.status(429).json({ error: 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.' })
+      }
       return res.status(response.status).json({ error: data.error?.message || 'Gemini API error' })
     }
 
@@ -72,4 +75,4 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
   } catch (err) {
     return res.status(500).json({ error: err.message })
   }
-}
+        }
