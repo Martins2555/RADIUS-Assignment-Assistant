@@ -76,6 +76,10 @@ function AuthScreen() {
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetMessage, setResetMessage] = useState('')
+  const [resetLoading, setResetLoading] = useState(false)
 
   const handleAuth = async (e) => {
     e.preventDefault()
@@ -96,6 +100,51 @@ function AuthScreen() {
     await supabase.auth.signInWithOAuth({ provider: 'google' })
   }
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault()
+    setResetLoading(true)
+    setResetMessage('')
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+      redirectTo: window.location.origin,
+    })
+    if (error) setResetMessage(error.message)
+    else setResetMessage('Check your email for a password reset link.')
+    setResetLoading(false)
+  }
+
+  if (showForgotPassword) {
+    return (
+      <div style={styles.container}>
+        <Logo />
+        <p className="fade-in-2" style={styles.subtitle}>Reset your password</p>
+        <form onSubmit={handleForgotPassword} className="fade-in-3" style={styles.form}>
+          <input
+            type="email"
+            placeholder="Email"
+            value={resetEmail}
+            onChange={(e) => setResetEmail(e.target.value)}
+            required
+            style={styles.input}
+          />
+          <button type="submit" disabled={resetLoading} style={styles.button}>
+            {resetLoading ? 'Please wait...' : 'Send Reset Link'}
+          </button>
+        </form>
+        <p
+          className="fade-in-3"
+          style={styles.toggle}
+          onClick={() => {
+            setShowForgotPassword(false)
+            setResetMessage('')
+          }}
+        >
+          Back to log in
+        </p>
+        {resetMessage && <p style={styles.message}>{resetMessage}</p>}
+      </div>
+    )
+  }
+
   return (
     <div style={styles.container}>
       <Logo />
@@ -107,6 +156,11 @@ function AuthScreen() {
           {loading ? 'Please wait...' : isSignUp ? 'Sign Up' : 'Log In'}
         </button>
       </form>
+      {!isSignUp && (
+        <p className="fade-in-3" style={styles.toggle} onClick={() => setShowForgotPassword(true)}>
+          Forgot password?
+        </p>
+      )}
       <button onClick={handleGoogleLogin} className="fade-in-3" style={styles.googleButton}>
         <GoogleIcon />
         Continue with Google
@@ -537,23 +591,88 @@ ${userText ? '\n\n' + userText : ''}`
   )
 }
 
+function ResetPasswordScreen({ onDone }) {
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setMessage('')
+    if (newPassword !== confirmPassword) {
+      setMessage('Passwords do not match.')
+      return
+    }
+    if (newPassword.length < 6) {
+      setMessage('Password must be at least 6 characters.')
+      return
+    }
+    setLoading(true)
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    setLoading(false)
+    if (error) {
+      setMessage(error.message)
+    } else {
+      onDone()
+    }
+  }
+
+  return (
+    <div style={styles.container}>
+      <Logo />
+      <p className="fade-in-2" style={styles.subtitle}>Set a new password</p>
+      <form onSubmit={handleSubmit} className="fade-in-3" style={styles.form}>
+        <input
+          type="password"
+          placeholder="New password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          required
+          style={styles.input}
+        />
+        <input
+          type="password"
+          placeholder="Confirm new password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          required
+          style={styles.input}
+        />
+        <button type="submit" disabled={loading} style={styles.button}>
+          {loading ? 'Please wait...' : 'Update Password'}
+        </button>
+      </form>
+      {message && <p style={styles.message}>{message}</p>}
+    </div>
+  )
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [checkingSession, setCheckingSession] = useState(true)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setCheckingSession(false)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true)
+      }
     })
     return () => listener.subscription.unsubscribe()
   }, [])
 
   if (checkingSession) {
     return <div style={styles.container}><p>Loading...</p></div>
+  }
+
+  if (passwordRecovery) {
+    return <ResetPasswordScreen onDone={() => setPasswordRecovery(false)} />
   }
 
   if (session) {
