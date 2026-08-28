@@ -86,9 +86,14 @@ function AuthScreen() {
     setLoading(true)
     setMessage('')
     if (isSignUp) {
-      const { error } = await supabase.auth.signUp({ email, password })
-      if (error) setMessage(error.message)
-      else setMessage('Check your email to confirm your account.')
+      const { data, error } = await supabase.auth.signUp({ email, password })
+      if (error) {
+        setMessage(error.message)
+      } else if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        setMessage('This email has already been registered to RADIUS. Please log in, or use "Forgot password?" if you don\'t remember your password.')
+      } else {
+        setMessage('Check your email to confirm your account.')
+      }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) setMessage(error.message)
@@ -233,6 +238,15 @@ function MessageBubble({ role, content, theme }) {
   )
 }
 
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result.split(',')[1])
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 function compressImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -359,6 +373,7 @@ function Dashboard({ session }) {
   const [activeConversationId, setActiveConversationId] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [attachedImage, setAttachedImage] = useState(null)
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false)
 
   const c = palette[theme]
   const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
@@ -409,11 +424,17 @@ function Dashboard({ session }) {
     if (!file) return
     setFileName(file.name)
     try {
-      const compressed = await compressImage(file)
-      setAttachedImage(compressed)
+      if (file.type.startsWith('image/')) {
+        const compressed = await compressImage(file)
+        setAttachedImage(compressed)
+      } else {
+        const base64 = await fileToBase64(file)
+        setAttachedImage({ base64, mimeType: file.type || 'application/pdf', preview: null, name: file.name })
+      }
     } catch (err) {
-      setError('Could not process that image. Please try a different file.')
+      setError('Could not process that file. Please try a different one.')
     }
+    e.target.value = ''
   }
 
   const handleRemoveImage = () => {
@@ -452,7 +473,8 @@ function Dashboard({ session }) {
 
       let imageUrl = null
       if (imageToSend) {
-        const path = `${session.user.id}/${Date.now()}.jpg`
+        const ext = imageToSend.mimeType === 'application/pdf' ? 'pdf' : (imageToSend.mimeType.split('/')[1] || 'dat')
+        const path = `${session.user.id}/${Date.now()}.${ext}`
         const blob = await (await fetch(`data:${imageToSend.mimeType};base64,${imageToSend.base64}`)).blob()
         const { error: uploadError } = await supabase.storage
           .from('assignment-images')
@@ -463,12 +485,15 @@ function Dashboard({ session }) {
         }
       }
 
-      const userContent = imageUrl
-        ? `
+      const isImageAttachment = imageToSend && imageToSend.mimeType.startsWith('image/')
+      const attachmentMarkdown = imageUrl
+        ? isImageAttachment
+          ? `![assignment image](${imageUrl})`
+          : `[📄 ${imageToSend.name || 'attached file'}](${imageUrl})`
+        : ''
 
-![assignment image](${imageUrl})
-
-${userText ? '\n\n' + userText : ''}`
+      const userContent = attachmentMarkdown
+        ? `${attachmentMarkdown}${userText ? '\n\n' + userText : ''}`
         : userText
 
       setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
@@ -560,7 +585,13 @@ ${userText ? '\n\n' + userText : ''}`
 
       {attachedImage && (
         <div style={{ margin: '0 1rem 0.6rem 1rem', position: 'relative', width: '70px' }}>
-          <img src={attachedImage.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
+          {attachedImage.preview ? (
+            <img src={attachedImage.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
+          ) : (
+            <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: c.subtext, textAlign: 'center', padding: '4px', overflow: 'hidden' }}>
+              📄 {attachedImage.name || 'File'}
+            </div>
+          )}
           <button
             onClick={handleRemoveImage}
             type="button"
@@ -572,10 +603,30 @@ ${userText ? '\n\n' + userText : ''}`
       )}
 
       <form onSubmit={handleSubmit} style={{ ...styles.bottomBar, backgroundColor: c.surface, borderColor: c.border }}>
-        <label style={styles.attachBtn}>
-          <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
-          <PlusIcon color={c.text} />
-        </label>
+        <div style={{ position: 'relative' }}>
+          {attachMenuOpen && (
+            <div onClick={() => setAttachMenuOpen(false)} style={styles.attachMenuOverlay} />
+          )}
+          <button type="button" onClick={() => setAttachMenuOpen((v) => !v)} style={styles.attachBtn}>
+            <PlusIcon color={c.text} />
+          </button>
+          {attachMenuOpen && (
+            <div style={{ ...styles.attachMenu, backgroundColor: c.surface, borderColor: c.border }}>
+              <label style={{ ...styles.attachMenuItem, color: c.text }} onClick={() => setAttachMenuOpen(false)}>
+                <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+                🖼️ Photos
+              </label>
+              <label style={{ ...styles.attachMenuItem, color: c.text }} onClick={() => setAttachMenuOpen(false)}>
+                <input type="file" accept="application/pdf,image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+                📄 Files
+              </label>
+              <label style={{ ...styles.attachMenuItem, color: c.text }} onClick={() => setAttachMenuOpen(false)}>
+                <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
+                📷 Camera
+              </label>
+            </div>
+          )}
+        </div>
         <input
           type="text"
           placeholder="Type your assignment here..."
@@ -703,7 +754,10 @@ const styles = {
   messagesArea: { flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflowY: 'auto' },
   subjectInput: { margin: '0 1rem 0.6rem 1rem', padding: '0.6rem 1rem', borderRadius: '20px', border: '1px solid', fontSize: '0.85rem', outline: 'none' },
   bottomBar: { display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem', margin: '0 1rem 1rem 1rem', borderRadius: '30px', border: '1px solid' },
-  attachBtn: { display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.3rem' },
+  attachBtn: { display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.3rem', background: 'none', border: 'none' },
+  attachMenuOverlay: { position: 'fixed', inset: 0, zIndex: 55 },
+  attachMenu: { position: 'absolute', bottom: '48px', left: 0, borderRadius: '12px', border: '1px solid', padding: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.2rem', zIndex: 60, minWidth: '150px' },
+  attachMenuItem: { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 0.7rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.9rem' },
   bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem' },
   sendBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.3rem' },
   themeBtn: { flex: 1, padding: '0.6rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
