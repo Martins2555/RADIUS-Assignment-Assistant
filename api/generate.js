@@ -36,10 +36,11 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Invalid or expired session' })
   }
 
-  const { subject, mode, assignmentText, history, image } = req.body
+  const { subject, mode, assignmentText, history, images } = req.body
+  const imageList = Array.isArray(images) ? images.slice(0, 10) : []
 
-  if (!assignmentText && !image) {
-    return res.status(400).json({ error: 'Assignment text or image is required' })
+  if (!assignmentText && imageList.length === 0) {
+    return res.status(400).json({ error: 'Assignment text or at least one file is required' })
   }
 
   const apiKey = process.env.GEMINI_API_KEY
@@ -58,7 +59,7 @@ MATH FORMATTING RULES (calculative mode):
 - Solve step by step, showing each algebraic manipulation as its own LaTeX line
 - Never describe math in plain prose when it can be shown as a formatted equation
 
-IMAGES: If the student attaches an image, it may contain a handwritten or printed assignment, problem, or question. Read it carefully and respond to what it actually contains.
+IMAGES: If the student attaches images or files, they may contain handwritten or printed assignments, problems, or questions — possibly spanning multiple pages or multiple related items. Read all of them carefully and respond to what they actually contain, treating them as one combined assignment unless they clearly look unrelated.
 
 For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 steps) covering research and structure. For calculative mode: break the problem down and solve it fully, showing every step.`
 
@@ -75,25 +76,43 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
 
   const currentParts = []
   if (assignmentText) currentParts.push({ text: assignmentText })
-  if (image && image.base64 && image.mimeType) {
-    currentParts.push({ inline_data: { mime_type: image.mimeType, data: image.base64 } })
+  for (const img of imageList) {
+    if (img && img.base64 && img.mimeType) {
+      currentParts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } })
+    }
   }
   contents.push({ role: 'user', parts: currentParts })
 
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
-      {
+  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`
+  const requestBody = JSON.stringify({
+    system_instruction: { parts: [{ text: systemInstruction }] },
+    contents,
+  })
+
+  async function callGeminiWithRetry(maxRetries = 2) {
+    let lastResponse, lastData
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const response = await fetch(GEMINI_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemInstruction }] },
-          contents,
-        }),
-      }
-    )
+        body: requestBody,
+      })
+      const data = await response.json()
 
-    const data = await response.json()
+      if (response.status !== 429 || attempt === maxRetries) {
+        return { response, data }
+      }
+
+      lastResponse = response
+      lastData = data
+      // Brief backoff before retrying: 1s, then 2s
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+    }
+    return { response: lastResponse, data: lastData }
+  }
+
+  try {
+    const { response, data } = await callGeminiWithRetry()
 
     if (!response.ok) {
       if (response.status === 429) {
