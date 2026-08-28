@@ -378,6 +378,9 @@ function Dashboard({ session }) {
   const c = palette[theme]
   const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
   const messagesEndRef = useRef(null)
+  const photosInputRef = useRef(null)
+  const filesInputRef = useRef(null)
+  const cameraInputRef = useRef(null)
 
   useEffect(() => {
     loadConversations()
@@ -603,6 +606,9 @@ function Dashboard({ session }) {
       )}
 
       <form onSubmit={handleSubmit} style={{ ...styles.bottomBar, backgroundColor: c.surface, borderColor: c.border }}>
+        <input ref={photosInputRef} type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+        <input ref={filesInputRef} type="file" accept="application/pdf,image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+        <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
         <div style={{ position: 'relative' }}>
           {attachMenuOpen && (
             <div onClick={() => setAttachMenuOpen(false)} style={styles.attachMenuOverlay} />
@@ -612,18 +618,27 @@ function Dashboard({ session }) {
           </button>
           {attachMenuOpen && (
             <div style={{ ...styles.attachMenu, backgroundColor: c.surface, borderColor: c.border }}>
-              <label style={{ ...styles.attachMenuItem, color: c.text }} onClick={() => setAttachMenuOpen(false)}>
-                <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+              <button
+                type="button"
+                style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%' }}
+                onClick={() => { setAttachMenuOpen(false); photosInputRef.current?.click() }}
+              >
                 🖼️ Photos
-              </label>
-              <label style={{ ...styles.attachMenuItem, color: c.text }} onClick={() => setAttachMenuOpen(false)}>
-                <input type="file" accept="application/pdf,image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+              </button>
+              <button
+                type="button"
+                style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%' }}
+                onClick={() => { setAttachMenuOpen(false); filesInputRef.current?.click() }}
+              >
                 📄 Files
-              </label>
-              <label style={{ ...styles.attachMenuItem, color: c.text }} onClick={() => setAttachMenuOpen(false)}>
-                <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
+              </button>
+              <button
+                type="button"
+                style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%' }}
+                onClick={() => { setAttachMenuOpen(false); cameraInputRef.current?.click() }}
+              >
                 📷 Camera
-              </label>
+              </button>
             </div>
           )}
         </div>
