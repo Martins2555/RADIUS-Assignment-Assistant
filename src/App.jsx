@@ -365,19 +365,19 @@ function Dashboard({ session }) {
   const [mode, setMode] = useState('calculative')
   const [subject, setSubject] = useState('')
   const [assignmentText, setAssignmentText] = useState('')
-  const [fileName, setFileName] = useState('')
+  const [attachedFiles, setAttachedFiles] = useState([])
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [conversations, setConversations] = useState([])
   const [activeConversationId, setActiveConversationId] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [attachedImage, setAttachedImage] = useState(null)
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
 
   const c = palette[theme]
   const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
   const messagesEndRef = useRef(null)
+  const textAreaRef = useRef(null)
   const photosInputRef = useRef(null)
   const filesInputRef = useRef(null)
   const cameraInputRef = useRef(null)
@@ -416,47 +416,62 @@ function Dashboard({ session }) {
     setActiveConversationId(null)
     setMessages([])
     setAssignmentText('')
-    setFileName('')
+    setAttachedFiles([])
     setError('')
     setSubject('')
     setSidebarOpen(false)
   }
 
+  const MAX_FILES = 10
+
   const handleFileChange = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    setFileName(file.name)
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    const room = MAX_FILES - attachedFiles.length
+    if (room <= 0) {
+      setError(`You can attach up to ${MAX_FILES} files at once.`)
+      e.target.value = ''
+      return
+    }
+    const filesToAdd = files.slice(0, room)
+    if (files.length > filesToAdd.length) {
+      setError(`Only added ${filesToAdd.length} file(s) — the ${MAX_FILES}-file limit was reached.`)
+    }
+
     try {
-      if (file.type.startsWith('image/')) {
-        const compressed = await compressImage(file)
-        setAttachedImage(compressed)
-      } else {
-        const base64 = await fileToBase64(file)
-        setAttachedImage({ base64, mimeType: file.type || 'application/pdf', preview: null, name: file.name })
-      }
+      const processed = await Promise.all(
+        filesToAdd.map(async (file) => {
+          if (file.type.startsWith('image/')) {
+            return await compressImage(file)
+          }
+          const base64 = await fileToBase64(file)
+          return { base64, mimeType: file.type || 'application/pdf', preview: null, name: file.name }
+        })
+      )
+      setAttachedFiles((prev) => [...prev, ...processed])
     } catch (err) {
-      setError('Could not process that file. Please try a different one.')
+      setError('Could not process one of those files. Please try again.')
     }
     e.target.value = ''
   }
 
-  const handleRemoveImage = () => {
-    setAttachedImage(null)
-    setFileName('')
+  const handleRemoveFile = (index) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!assignmentText.trim() && !attachedImage) return
+    if (!assignmentText.trim() && attachedFiles.length === 0) return
 
     setLoading(true)
     setError('')
 
     const userText = assignmentText
-    const imageToSend = attachedImage
+    const filesToSend = attachedFiles
     setAssignmentText('')
-    setAttachedImage(null)
-    setFileName('')
+    setAttachedFiles([])
+    if (textAreaRef.current) textAreaRef.current.style.height = 'auto'
 
     try {
       let conversationId = activeConversationId
@@ -474,29 +489,27 @@ function Dashboard({ session }) {
         setConversations((prev) => [newConv, ...prev])
       }
 
-      let imageUrl = null
-      if (imageToSend) {
-        const ext = imageToSend.mimeType === 'application/pdf' ? 'pdf' : (imageToSend.mimeType.split('/')[1] || 'dat')
-        const path = `${session.user.id}/${Date.now()}.${ext}`
-        const blob = await (await fetch(`data:${imageToSend.mimeType};base64,${imageToSend.base64}`)).blob()
+      const attachmentMarkdownParts = []
+      for (const file of filesToSend) {
+        const ext = file.mimeType === 'application/pdf' ? 'pdf' : (file.mimeType.split('/')[1] || 'dat')
+        const path = `${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const blob = await (await fetch(`data:${file.mimeType};base64,${file.base64}`)).blob()
         const { error: uploadError } = await supabase.storage
           .from('assignment-images')
-          .upload(path, blob, { contentType: imageToSend.mimeType })
+          .upload(path, blob, { contentType: file.mimeType })
         if (!uploadError) {
           const { data: urlData } = supabase.storage.from('assignment-images').getPublicUrl(path)
-          imageUrl = urlData.publicUrl
+          const isImageAttachment = file.mimeType.startsWith('image/')
+          attachmentMarkdownParts.push(
+            isImageAttachment
+              ? `![assignment image](${urlData.publicUrl})`
+              : `[📄 ${file.name || 'attached file'}](${urlData.publicUrl})`
+          )
         }
       }
 
-      const isImageAttachment = imageToSend && imageToSend.mimeType.startsWith('image/')
-      const attachmentMarkdown = imageUrl
-        ? isImageAttachment
-          ? `![assignment image](${imageUrl})`
-          : `[📄 ${imageToSend.name || 'attached file'}](${imageUrl})`
-        : ''
-
-      const userContent = attachmentMarkdown
-        ? `${attachmentMarkdown}${userText ? '\n\n' + userText : ''}`
+      const userContent = attachmentMarkdownParts.length
+        ? `${attachmentMarkdownParts.join('\n\n')}${userText ? '\n\n' + userText : ''}`
         : userText
 
       setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
@@ -515,7 +528,7 @@ function Dashboard({ session }) {
           mode,
           assignmentText: userText,
           history,
-          image: imageToSend ? { base64: imageToSend.base64, mimeType: imageToSend.mimeType } : null,
+          images: filesToSend.map((f) => ({ base64: f.base64, mimeType: f.mimeType })),
         }),
       })
       const data = await response.json()
@@ -586,28 +599,32 @@ function Dashboard({ session }) {
         style={{ ...styles.subjectInput, backgroundColor: c.surface, borderColor: c.border, color: c.text }}
       />
 
-      {attachedImage && (
-        <div style={{ margin: '0 1rem 0.6rem 1rem', position: 'relative', width: '70px' }}>
-          {attachedImage.preview ? (
-            <img src={attachedImage.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
-          ) : (
-            <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: c.subtext, textAlign: 'center', padding: '4px', overflow: 'hidden' }}>
-              📄 {attachedImage.name || 'File'}
+      {attachedFiles.length > 0 && (
+        <div style={{ margin: '0 1rem 0.6rem 1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {attachedFiles.map((file, index) => (
+            <div key={index} style={{ position: 'relative', width: '70px' }}>
+              {file.preview ? (
+                <img src={file.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
+              ) : (
+                <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: c.subtext, textAlign: 'center', padding: '4px', overflow: 'hidden' }}>
+                  📄 {file.name || 'File'}
+                </div>
+              )}
+              <button
+                onClick={() => handleRemoveFile(index)}
+                type="button"
+                style={{ position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', border: 'none', backgroundColor: '#ef4444', color: '#fff', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
             </div>
-          )}
-          <button
-            onClick={handleRemoveImage}
-            type="button"
-            style={{ position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', border: 'none', backgroundColor: '#ef4444', color: '#fff', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            ✕
-          </button>
+          ))}
         </div>
       )}
 
       <form onSubmit={handleSubmit} style={{ ...styles.bottomBar, backgroundColor: c.surface, borderColor: c.border }}>
-        <input ref={photosInputRef} type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
-        <input ref={filesInputRef} type="file" accept="application/pdf,image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+        <input ref={photosInputRef} type="file" accept="image/*" multiple onChange={handleFileChange} style={{ display: 'none' }} />
+        <input ref={filesInputRef} type="file" accept="application/pdf,image/*" multiple onChange={handleFileChange} style={{ display: 'none' }} />
         <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
         <div style={{ position: 'relative' }}>
           {attachMenuOpen && (
@@ -642,11 +659,23 @@ function Dashboard({ session }) {
             </div>
           )}
         </div>
-        <input
-          type="text"
+        <textarea
+          ref={textAreaRef}
+          rows={1}
           placeholder="Type your assignment here..."
           value={assignmentText}
-          onChange={(e) => setAssignmentText(e.target.value)}
+          onChange={(e) => {
+            setAssignmentText(e.target.value)
+            const el = e.target
+            el.style.height = 'auto'
+            el.style.height = Math.min(el.scrollHeight, 150) + 'px'
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              e.currentTarget.form?.requestSubmit()
+            }
+          }}
           style={{ ...styles.bottomInput, color: c.text }}
         />
         <button type="submit" disabled={loading} style={styles.sendBtn}>
@@ -768,12 +797,12 @@ const styles = {
   modeBtn: { padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' },
   messagesArea: { flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflowY: 'auto' },
   subjectInput: { margin: '0 1rem 0.6rem 1rem', padding: '0.6rem 1rem', borderRadius: '20px', border: '1px solid', fontSize: '0.85rem', outline: 'none' },
-  bottomBar: { display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem', margin: '0 1rem 1rem 1rem', borderRadius: '30px', border: '1px solid' },
+  bottomBar: { display: 'flex', alignItems: 'flex-end', gap: '0.6rem', padding: '0.6rem', margin: '0 1rem 1rem 1rem', borderRadius: '24px', border: '1px solid' },
   attachBtn: { display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.3rem', background: 'none', border: 'none' },
   attachMenuOverlay: { position: 'fixed', inset: 0, zIndex: 55 },
   attachMenu: { position: 'absolute', bottom: '48px', left: 0, borderRadius: '12px', border: '1px solid', padding: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.2rem', zIndex: 60, minWidth: '150px' },
   attachMenuItem: { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 0.7rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.9rem' },
-  bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem' },
+  bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem', fontFamily: 'inherit', resize: 'none', overflowY: 'auto', maxHeight: '150px', lineHeight: '1.4', padding: '0.4rem 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
   sendBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.3rem' },
   themeBtn: { flex: 1, padding: '0.6rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
   logoutBtn: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 'bold' },
