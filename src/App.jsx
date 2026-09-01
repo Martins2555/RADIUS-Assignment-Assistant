@@ -498,13 +498,21 @@ function Dashboard({ session }) {
           .from('assignment-images')
           .upload(path, blob, { contentType: file.mimeType })
         if (!uploadError) {
-          const { data: urlData } = supabase.storage.from('assignment-images').getPublicUrl(path)
-          const isImageAttachment = file.mimeType.startsWith('image/')
-          attachmentMarkdownParts.push(
-            isImageAttachment
-              ? `![assignment image](${urlData.publicUrl})`
-              : `[📄 ${file.name || 'attached file'}](${urlData.publicUrl})`
-          )
+          // Signed URL instead of a public one — the bucket is private, so this is
+          // required for the link to work at all. Expiry is set very long (10 years)
+          // because the URL gets baked into the stored message content in Supabase;
+          // once a message is saved, there's no later point to re-sign it.
+          const { data: urlData, error: signError } = await supabase.storage
+            .from('assignment-images')
+            .createSignedUrl(path, 60 * 60 * 24 * 365 * 10)
+          if (!signError && urlData) {
+            const isImageAttachment = file.mimeType.startsWith('image/')
+            attachmentMarkdownParts.push(
+              isImageAttachment
+                ? `![assignment image](${urlData.signedUrl})`
+                : `[📄 ${file.name || 'attached file'}](${urlData.signedUrl})`
+            )
+          }
         }
       }
 
