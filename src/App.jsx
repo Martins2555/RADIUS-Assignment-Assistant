@@ -49,6 +49,35 @@ function PlusIcon({ color }) {
   )
 }
 
+function PhotosIcon({ color }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4" width="18" height="16" rx="2.5" stroke={color} strokeWidth="1.7" />
+      <circle cx="8.5" cy="9.5" r="1.6" stroke={color} strokeWidth="1.5" />
+      <path d="M4 17l5-5 3.5 3.5L17 10l4 4.5" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function FileAttachIcon({ color }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M8 2h6l5 5v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" stroke={color} strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M14 2v5h5" stroke={color} strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M9 13h6M9 17h6" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function CameraIcon({ color }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.6A1.5 1.5 0 0 1 9.8 3.7h4.4a1.5 1.5 0 0 1 1.3.7l1 1.6H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8z" stroke={color} strokeWidth="1.7" strokeLinejoin="round" />
+      <circle cx="12" cy="13" r="3.4" stroke={color} strokeWidth="1.7" />
+    </svg>
+  )
+}
+
 function SendIcon({ color }) {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
@@ -1091,27 +1120,36 @@ function Dashboard({ session }) {
             <PlusIcon color={c.text} />
           </button>
           {attachMenuOpen && (
-            <div style={{ ...styles.attachMenu, backgroundColor: c.surface, borderColor: c.border }}>
+            <div style={{ ...styles.attachMenu, backgroundColor: c.surface, borderColor: c.border, minWidth: '190px', padding: '0.5rem' }}>
               <button
                 type="button"
                 style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%' }}
                 onClick={() => { setAttachMenuOpen(false); photosInputRef.current?.click() }}
               >
-                🖼️ Photos
+                <span style={{ ...styles.attachMenuIconWrap, backgroundColor: c.bg }}>
+                  <PhotosIcon color={c.text} />
+                </span>
+                Photos
               </button>
               <button
                 type="button"
                 style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%' }}
                 onClick={() => { setAttachMenuOpen(false); filesInputRef.current?.click() }}
               >
-                📄 Files
+                <span style={{ ...styles.attachMenuIconWrap, backgroundColor: c.bg }}>
+                  <FileAttachIcon color={c.text} />
+                </span>
+                Files
               </button>
               <button
                 type="button"
                 style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%' }}
                 onClick={() => { setAttachMenuOpen(false); cameraInputRef.current?.click() }}
               >
-                📷 Camera
+                <span style={{ ...styles.attachMenuIconWrap, backgroundColor: c.bg }}>
+                  <CameraIcon color={c.text} />
+                </span>
+                Camera
               </button>
             </div>
           )}
@@ -1258,7 +1296,8 @@ const styles = {
   attachBtn: { display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.3rem', background: 'none', border: 'none' },
   attachMenuOverlay: { position: 'fixed', inset: 0, zIndex: 55 },
   attachMenu: { position: 'absolute', bottom: '48px', left: 0, borderRadius: '12px', border: '1px solid', padding: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.2rem', zIndex: 60, minWidth: '150px' },
-  attachMenuItem: { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 0.7rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.9rem' },
+  attachMenuItem: { display: 'flex', alignItems: 'center', gap: '0.7rem', padding: '0.55rem 0.5rem', borderRadius: '10px', cursor: 'pointer', fontSize: '0.9rem' },
+  attachMenuIconWrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0 },
   bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem', fontFamily: 'inherit', resize: 'none', overflowY: 'auto', maxHeight: '150px', lineHeight: '1.4', padding: '0.4rem 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
   sendBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.3rem' },
   themeBtn: { flex: 1, padding: '0.6rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
