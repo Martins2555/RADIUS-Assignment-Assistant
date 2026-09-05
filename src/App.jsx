@@ -57,9 +57,71 @@ function SendIcon({ color }) {
   )
 }
 
-const palette = {
-  dark: { bg: '#0f0f0f', surface: '#1a1a1a', border: '#333', text: '#ffffff', subtext: '#888', accent: '#22c55e', accentText: '#000' },
-  light: { bg: '#ffffff', surface: '#f0f0f0', border: '#ddd', text: '#111111', subtext: '#666', accent: '#16a34a', accentText: '#ffffff' },
+function CopyIcon({ color }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <rect x="9" y="9" width="12" height="12" rx="2" stroke={color} strokeWidth="1.8" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function ThumbsUpIcon({ color, filled }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill={filled ? color : 'none'}>
+      <path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3zm0 0l4.5-8a2 2 0 0 1 3.4 1.9L13.8 9H19a2 2 0 0 1 1.9 2.7l-2.6 7A2 2 0 0 1 16.4 20H10a3 3 0 0 1-3-3" stroke={color} strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function ThumbsDownIcon({ color, filled }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill={filled ? color : 'none'} style={{ transform: 'rotate(180deg)' }}>
+      <path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3zm0 0l4.5-8a2 2 0 0 1 3.4 1.9L13.8 9H19a2 2 0 0 1 1.9 2.7l-2.6 7A2 2 0 0 1 16.4 20H10a3 3 0 0 1-3-3" stroke={color} strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function TrashIcon({ color }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0v13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function PencilIcon({ color }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M4 20l1-4L16 5l3 3L8 19l-4 1z" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// Free color choices for the chat accent. Kept simple and all-unlocked for now —
+// this is where a "premium" lock would slot in later once payment is wired up.
+const accentColors = {
+  green: { dark: '#22c55e', light: '#16a34a' },
+  blue: { dark: '#3b82f6', light: '#2563eb' },
+  purple: { dark: '#a855f7', light: '#9333ea' },
+  pink: { dark: '#ec4899', light: '#db2777' },
+  orange: { dark: '#f97316', light: '#ea580c' },
+}
+const accentOrder = ['green', 'blue', 'purple', 'pink', 'orange']
+
+const modeBase = {
+  dark: { bg: '#0f0f0f', surface: '#1a1a1a', border: '#333', text: '#ffffff', subtext: '#888' },
+  light: { bg: '#ffffff', surface: '#f0f0f0', border: '#ddd', text: '#111111', subtext: '#666' },
+}
+
+function getPalette(theme, accentColor) {
+  const base = modeBase[theme] || modeBase.dark
+  const ac = accentColors[accentColor] || accentColors.green
+  return {
+    ...base,
+    accent: ac[theme] || ac.dark,
+    accentText: theme === 'light' ? '#ffffff' : '#000000',
+  }
 }
 
 function Logo({ small }) {
@@ -178,8 +240,8 @@ function AuthScreen() {
   )
 }
 
-function SettingsScreen({ session, theme, setTheme, onBack }) {
-  const c = palette[theme]
+function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, onBack }) {
+  const c = getPalette(theme, accentColor)
   const handleLogout = async () => {
     await supabase.auth.signOut()
   }
@@ -199,17 +261,97 @@ function SettingsScreen({ session, theme, setTheme, onBack }) {
           <button onClick={() => setTheme('light')} style={{ ...styles.themeBtn, borderColor: theme === 'light' ? c.accent : c.border, color: c.text }}>Light</button>
         </div>
       </div>
+      <div style={{ marginTop: '2rem' }}>
+        <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>CHAT COLOR</p>
+        <div style={{ display: 'flex', gap: '0.7rem' }}>
+          {accentOrder.map((key) => (
+            <button
+              key={key}
+              onClick={() => setAccentColor(key)}
+              aria-label={key}
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '50%',
+                border: accentColor === key ? `2.5px solid ${c.text}` : '2.5px solid transparent',
+                padding: 0,
+                cursor: 'pointer',
+                backgroundColor: 'transparent',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: accentColors[key][theme] || accentColors[key].dark, display: 'block' }} />
+            </button>
+          ))}
+        </div>
+        <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.6rem' }}>More colors and custom backgrounds are coming with premium.</p>
+      </div>
       <button onClick={handleLogout} style={{ ...styles.logoutBtn, borderColor: c.border, color: '#ef4444', marginTop: '2.5rem' }}>Log Out</button>
     </div>
   )
 }
 
-function MessageBubble({ role, content, theme }) {
-  const c = palette[theme]
+// Shared long-press detection for touch (mobile) and mouse (desktop), plus a
+// right-click fallback. Cancels if the finger/mouse moves, so it doesn't fight
+// with scrolling. Kept separate from any native text-selection popup by the
+// caller setting userSelect: 'none' on the pressed element.
+function useLongPress(onLongPress, ms = 480) {
+  const timerRef = useRef(null)
+  const startRef = useRef(null)
+
+  const clear = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  const start = (e) => {
+    const point = e.touches ? e.touches[0] : e
+    startRef.current = { x: point.clientX, y: point.clientY }
+    clear()
+    timerRef.current = setTimeout(() => {
+      onLongPress(point.clientX, point.clientY)
+    }, ms)
+  }
+
+  const move = (e) => {
+    if (!startRef.current) return
+    const point = e.touches ? e.touches[0] : e
+    const dx = Math.abs(point.clientX - startRef.current.x)
+    const dy = Math.abs(point.clientY - startRef.current.y)
+    if (dx > 10 || dy > 10) clear()
+  }
+
+  return {
+    onTouchStart: start,
+    onTouchMove: move,
+    onTouchEnd: clear,
+    onTouchCancel: clear,
+    onMouseDown: start,
+    onMouseMove: move,
+    onMouseUp: clear,
+    onMouseLeave: clear,
+    onContextMenu: (e) => {
+      e.preventDefault()
+      onLongPress(e.clientX, e.clientY)
+    },
+  }
+}
+
+const noSelectStyle = { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }
+
+function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback }) {
+  const c = getPalette(theme, accentColor)
   const isUser = role === 'user'
+  const longPress = useLongPress((x, y) => onLongPress(x, y, { id, role, content }))
+
   return (
-    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.7rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.35rem' }}>
       <div
+        {...longPress}
         style={{
           maxWidth: '85%',
           padding: '0.7rem 1rem',
@@ -217,6 +359,7 @@ function MessageBubble({ role, content, theme }) {
           backgroundColor: isUser ? c.accent : c.surface,
           color: isUser ? c.accentText : c.text,
           border: isUser ? 'none' : `1px solid ${c.border}`,
+          ...noSelectStyle,
         }}
       >
         <div style={{ lineHeight: '1.6' }} className="radius-markdown">
@@ -234,7 +377,62 @@ function MessageBubble({ role, content, theme }) {
           </ReactMarkdown>
         </div>
       </div>
+      {!isUser && (
+        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.3rem', paddingLeft: '0.2rem' }}>
+          <button type="button" onClick={() => onCopy(content)} style={styles.msgFeedbackBtn} aria-label="Copy">
+            <CopyIcon color={c.subtext} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onFeedback(id, feedback === 'up' ? null : 'up')}
+            style={styles.msgFeedbackBtn}
+            aria-label="Good response"
+          >
+            <ThumbsUpIcon color={feedback === 'up' ? c.accent : c.subtext} filled={feedback === 'up'} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onFeedback(id, feedback === 'down' ? null : 'down')}
+            style={styles.msgFeedbackBtn}
+            aria-label="Bad response"
+          >
+            <ThumbsDownIcon color={feedback === 'down' ? '#ef4444' : c.subtext} filled={feedback === 'down'} />
+          </button>
+        </div>
+      )}
     </div>
+  )
+}
+
+function LongPressMenu({ menu, onClose, theme, accentColor, onCopy, onEdit }) {
+  const c = getPalette(theme, accentColor)
+  if (!menu) return null
+  const isUser = menu.role === 'user'
+  const top = typeof window !== 'undefined' ? Math.min(menu.y, window.innerHeight - 110) : menu.y
+  const left = typeof window !== 'undefined' ? Math.min(menu.x, window.innerWidth - 170) : menu.x
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 65 }} />
+      <div style={{ ...styles.attachMenu, position: 'fixed', top, left, zIndex: 70, backgroundColor: c.surface, borderColor: c.border }}>
+        <button
+          type="button"
+          style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          onClick={() => { onCopy(menu.content); onClose() }}
+        >
+          <CopyIcon color={c.text} /> Copy
+        </button>
+        {isUser && (
+          <button
+            type="button"
+            style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            onClick={() => { onEdit(menu.content); onClose() }}
+          >
+            <PencilIcon color={c.text} /> Edit &amp; resend
+          </button>
+        )}
+      </div>
+    </>
   )
 }
 
@@ -281,9 +479,85 @@ function compressImage(file) {
   })
 }
 
-function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, theme, session }) {
-  const c = palette[theme]
+function ConversationRow({ conv, isActive, c, onSelect, onLongPress, isRenaming, renameValue, onRenameChange, onRenameCommit }) {
+  const longPress = useLongPress((x, y) => onLongPress(x, y, conv))
+
+  if (isRenaming) {
+    return (
+      <input
+        autoFocus
+        value={renameValue}
+        onChange={(e) => onRenameChange(e.target.value)}
+        onBlur={onRenameCommit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); onRenameCommit() }
+        }}
+        style={{
+          width: '100%',
+          boxSizing: 'border-box',
+          padding: '0.65rem 0.8rem',
+          borderRadius: '8px',
+          border: `1px solid ${c.accent}`,
+          backgroundColor: c.bg,
+          color: c.text,
+          fontSize: '0.9rem',
+          marginBottom: '0.2rem',
+          outline: 'none',
+        }}
+      />
+    )
+  }
+
+  return (
+    <div
+      {...longPress}
+      onClick={onSelect}
+      style={{
+        padding: '0.7rem 0.8rem',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        backgroundColor: isActive ? c.bg : 'transparent',
+        color: c.text,
+        fontSize: '0.9rem',
+        marginBottom: '0.2rem',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        ...noSelectStyle,
+      }}
+    >
+      {conv.title || 'New chat'}
+    </div>
+  )
+}
+
+function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, onRenameConversation, onDeleteConversation, theme, accentColor, session }) {
+  const c = getPalette(theme, accentColor)
+  const [rowMenu, setRowMenu] = useState(null)
+  const [renamingId, setRenamingId] = useState(null)
+  const [renameValue, setRenameValue] = useState('')
+
   if (!open) return null
+
+  const startRename = (conv) => {
+    setRenamingId(conv.id)
+    setRenameValue(conv.title || '')
+    setRowMenu(null)
+  }
+  const commitRename = () => {
+    const title = renameValue.trim()
+    if (title && renamingId) onRenameConversation(renamingId, title)
+    setRenamingId(null)
+  }
+  const confirmDelete = (conv) => {
+    setRowMenu(null)
+    if (window.confirm('Delete this chat? This cannot be undone.')) {
+      onDeleteConversation(conv.id)
+    }
+  }
+
+  const menuTop = rowMenu && typeof window !== 'undefined' ? Math.min(rowMenu.y, window.innerHeight - 110) : rowMenu?.y
+  const menuLeft = rowMenu && typeof window !== 'undefined' ? Math.min(rowMenu.x, window.innerWidth - 170) : rowMenu?.x
 
   return (
     <>
@@ -308,24 +582,18 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
             <p style={{ color: c.subtext, fontSize: '0.85rem', padding: '0.6rem' }}>No chats yet</p>
           )}
           {conversations.map((conv) => (
-            <div
+            <ConversationRow
               key={conv.id}
-              onClick={() => onSelectConversation(conv)}
-              style={{
-                padding: '0.7rem 0.8rem',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                backgroundColor: conv.id === activeConversationId ? c.bg : 'transparent',
-                color: c.text,
-                fontSize: '0.9rem',
-                marginBottom: '0.2rem',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {conv.title || 'New chat'}
-            </div>
+              conv={conv}
+              isActive={conv.id === activeConversationId}
+              c={c}
+              onSelect={() => onSelectConversation(conv)}
+              onLongPress={(x, y, conv) => setRowMenu({ x, y, conv })}
+              isRenaming={renamingId === conv.id}
+              renameValue={renameValue}
+              onRenameChange={setRenameValue}
+              onRenameCommit={commitRename}
+            />
           ))}
         </div>
 
@@ -355,13 +623,36 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
           </span>
         </div>
       </div>
+
+      {rowMenu && (
+        <>
+          <div onClick={() => setRowMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 65 }} />
+          <div style={{ ...styles.attachMenu, position: 'fixed', top: menuTop, left: menuLeft, zIndex: 70, backgroundColor: c.bg, borderColor: c.border }}>
+            <button
+              type="button"
+              style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              onClick={() => startRename(rowMenu.conv)}
+            >
+              <PencilIcon color={c.text} /> Rename
+            </button>
+            <button
+              type="button"
+              style={{ ...styles.attachMenuItem, color: '#ef4444', background: 'none', border: 'none', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              onClick={() => confirmDelete(rowMenu.conv)}
+            >
+              <TrashIcon color="#ef4444" /> Delete
+            </button>
+          </div>
+        </>
+      )}
     </>
   )
 }
 
 function Dashboard({ session }) {
   const [view, setView] = useState('main')
-  const [theme, setTheme] = useState('dark')
+  const [theme, setTheme] = useState(() => localStorage.getItem('radius-theme') || 'dark')
+  const [accentColor, setAccentColor] = useState(() => localStorage.getItem('radius-accent') || 'green')
   const [mode, setMode] = useState('calculative')
   const [subject, setSubject] = useState('')
   const [assignmentText, setAssignmentText] = useState('')
@@ -373,8 +664,9 @@ function Dashboard({ session }) {
   const [activeConversationId, setActiveConversationId] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
+  const [longPressMenu, setLongPressMenu] = useState(null)
 
-  const c = palette[theme]
+  const c = getPalette(theme, accentColor)
   const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
   const messagesEndRef = useRef(null)
   const textAreaRef = useRef(null)
@@ -387,8 +679,52 @@ function Dashboard({ session }) {
   }, [])
 
   useEffect(() => {
+    localStorage.setItem('radius-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem('radius-accent', accentColor)
+  }, [accentColor])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  function handleCopyText(text) {
+    navigator.clipboard?.writeText(text || '')
+  }
+
+  function handleEditMessage(text) {
+    setAssignmentText(text || '')
+    requestAnimationFrame(() => textAreaRef.current?.focus())
+  }
+
+  async function handleSetFeedback(messageId, value) {
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, feedback: value } : m)))
+    // Best-effort only: skips messages that haven't round-tripped to the DB yet
+    // (temp- ids), and silently no-ops if the `feedback` column doesn't exist
+    // yet on the messages table.
+    if (typeof messageId === 'string' && messageId.startsWith('temp-')) return
+    try {
+      await supabase.from('messages').update({ feedback: value }).eq('id', messageId)
+    } catch (e) {
+      // ignore — see comment above
+    }
+  }
+
+  async function handleRenameConversation(id, title) {
+    setConversations((prev) => prev.map((cv) => (cv.id === id ? { ...cv, title } : cv)))
+    await supabase.from('conversations').update({ title }).eq('id', id)
+  }
+
+  async function handleDeleteConversation(id) {
+    setConversations((prev) => prev.filter((cv) => cv.id !== id))
+    if (activeConversationId === id) {
+      handleNewChat()
+    }
+    await supabase.from('messages').delete().eq('conversation_id', id)
+    await supabase.from('conversations').delete().eq('id', id)
+  }
 
   async function loadConversations() {
     const { data, error } = await supabase
@@ -555,11 +891,20 @@ function Dashboard({ session }) {
   }
 
   if (view === 'settings') {
-    return <SettingsScreen session={session} theme={theme} setTheme={setTheme} onBack={() => setView('main')} />
+    return (
+      <SettingsScreen
+        session={session}
+        theme={theme}
+        setTheme={setTheme}
+        accentColor={accentColor}
+        setAccentColor={setAccentColor}
+        onBack={() => setView('main')}
+      />
+    )
   }
 
   return (
-    <div style={{ ...styles.dashboardContainer, backgroundColor: c.bg, color: c.text }}>
+    <div className="radius-app-shell" style={{ ...styles.dashboardContainer, backgroundColor: c.bg, color: c.text }}>
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -568,8 +913,20 @@ function Dashboard({ session }) {
         onSelectConversation={openConversation}
         onNewChat={handleNewChat}
         onOpenSettings={() => { setSidebarOpen(false); setView('settings') }}
+        onRenameConversation={handleRenameConversation}
+        onDeleteConversation={handleDeleteConversation}
         theme={theme}
+        accentColor={accentColor}
         session={session}
+      />
+
+      <LongPressMenu
+        menu={longPressMenu}
+        onClose={() => setLongPressMenu(null)}
+        theme={theme}
+        accentColor={accentColor}
+        onCopy={handleCopyText}
+        onEdit={handleEditMessage}
       />
 
       <div style={styles.topBar}>
@@ -590,7 +947,18 @@ function Dashboard({ session }) {
         )}
 
         {messages.map((m) => (
-          <MessageBubble key={m.id} role={m.role} content={m.content} theme={theme} />
+          <MessageBubble
+            key={m.id}
+            id={m.id}
+            role={m.role}
+            content={m.content}
+            theme={theme}
+            accentColor={accentColor}
+            feedback={m.feedback}
+            onLongPress={(x, y, msg) => setLongPressMenu({ x, y, ...msg })}
+            onCopy={handleCopyText}
+            onFeedback={handleSetFeedback}
+          />
         ))}
 
         {loading && <p style={{ color: c.subtext, padding: '0.4rem 0' }}>Thinking through your assignment...</p>}
@@ -787,7 +1155,7 @@ function App() {
 
 const styles = {
   container: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem', fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#0f0f0f', color: '#fff' },
-  dashboardContainer: { minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'sans-serif', maxWidth: '640px', margin: '0 auto', width: '100%' },
+  dashboardContainer: { display: 'flex', flexDirection: 'column', fontFamily: 'sans-serif', maxWidth: '640px', margin: '0 auto', width: '100%' },
   settingsContainer: { minHeight: '100vh', padding: '1.2rem', fontFamily: 'sans-serif', maxWidth: '640px', margin: '0 auto', width: '100%' },
   topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.2rem' },
   iconBtn: { background: 'none', border: 'none', cursor: 'pointer', padding: '0.3rem' },
@@ -803,7 +1171,7 @@ const styles = {
   message: { marginTop: '1rem', color: '#4ade80' },
   modeToggle: { display: 'flex', gap: '0.4rem' },
   modeBtn: { padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' },
-  messagesArea: { flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflowY: 'auto' },
+  messagesArea: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '1rem', overflowY: 'auto', WebkitOverflowScrolling: 'touch' },
   subjectInput: { margin: '0 1rem 0.6rem 1rem', padding: '0.6rem 1rem', borderRadius: '20px', border: '1px solid', fontSize: '0.85rem', outline: 'none' },
   bottomBar: { display: 'flex', alignItems: 'flex-end', gap: '0.6rem', padding: '0.6rem', margin: '0 1rem 1rem 1rem', borderRadius: '24px', border: '1px solid' },
   attachBtn: { display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.3rem', background: 'none', border: 'none' },
@@ -817,6 +1185,7 @@ const styles = {
   sidebarOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 40 },
   sidebarPanel: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '80%', maxWidth: '300px', borderRight: '1px solid', zIndex: 50, display: 'flex', flexDirection: 'column' },
   newChatSidebarBtn: { display: 'flex', alignItems: 'center', gap: '0.6rem', margin: '0 1rem', padding: '0.6rem 0.8rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
+  msgFeedbackBtn: { background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' },
 }
 
 export default App
