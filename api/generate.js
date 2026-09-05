@@ -80,11 +80,28 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
 
   const currentParts = []
   if (assignmentText) currentParts.push({ text: assignmentText })
-  for (const img of imageList) {
-    if (img && img.base64 && img.mimeType) {
-      currentParts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } })
-    }
-  }
+
+  // Files are fetched server-side from their (already-uploaded) Supabase signed
+  // URL rather than shipped as base64 in the request body. Vercel serverless
+  // functions hard-cap the incoming request body at 4.5MB — a base64-encoded
+  // PDF blows past that in one message and the whole request used to fail.
+  // Fetching server-to-server here has no such limit, and doing it in
+  // parallel keeps this from adding noticeable latency.
+  const fetchedParts = await Promise.all(
+    imageList.map(async (img) => {
+      if (!img || !img.url || !img.mimeType) return null
+      try {
+        const fileRes = await fetch(img.url)
+        if (!fileRes.ok) return null
+        const arrayBuffer = await fileRes.arrayBuffer()
+        const base64 = Buffer.from(arrayBuffer).toString('base64')
+        return { inline_data: { mime_type: img.mimeType, data: base64 } }
+      } catch (e) {
+        return null
+      }
+    })
+  )
+  currentParts.push(...fetchedParts.filter(Boolean))
   contents.push({ role: 'user', parts: currentParts })
 
   const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`
