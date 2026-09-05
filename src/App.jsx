@@ -428,8 +428,70 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
             rehypePlugins={[rehypeKatex]}
             components={{
               img: (props) => (
-                <img {...props} style={{ maxWidth: '100%', borderRadius: '10px', marginTop: '0.4rem', display: 'block' }} />
+                <a href={props.src} target="_blank" rel="noreferrer">
+                  <img
+                    {...props}
+                    style={{
+                      width: '104px',
+                      height: '104px',
+                      objectFit: 'cover',
+                      borderRadius: '10px',
+                      margin: '3px',
+                      display: 'inline-block',
+                      verticalAlign: 'middle',
+                      border: `1px solid ${isUser ? 'rgba(0,0,0,0.15)' : c.border}`,
+                    }}
+                  />
+                </a>
               ),
+              a: (props) => {
+                const raw = Array.isArray(props.children) ? props.children.join('') : String(props.children ?? '')
+                if (raw.startsWith('📄 ')) {
+                  const label = raw.slice(2).trim()
+                  const ext = (label.includes('.') ? label.split('.').pop() : 'FILE').toUpperCase().slice(0, 4)
+                  return (
+                    <a
+                      href={props.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.45rem 0.7rem',
+                        borderRadius: '10px',
+                        border: '1.5px solid currentColor',
+                        opacity: 0.95,
+                        maxWidth: '190px',
+                        margin: '3px',
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: '0.6rem',
+                          fontWeight: 'bold',
+                          padding: '2px 5px',
+                          borderRadius: '4px',
+                          backgroundColor: 'currentColor',
+                          color: isUser ? c.accent : c.bg,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {ext}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem' }}>{label}</span>
+                    </a>
+                  )
+                }
+                return (
+                  <a href={props.href} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>
+                    {props.children}
+                  </a>
+                )
+              },
               p: (props) => <p {...props} style={{ margin: '0 0 0.5rem 0' }} />,
             }}
           >
@@ -814,10 +876,20 @@ function Dashboard({ session }) {
   }
 
   async function loadConversations() {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('conversations')
       .select('id, title, mode, subject, updated_at, is_pinned')
       .order('updated_at', { ascending: false })
+    if (error) {
+      // `is_pinned` likely doesn't exist on the live table yet — fall back
+      // so the whole history list doesn't silently disappear because of it.
+      const fallback = await supabase
+        .from('conversations')
+        .select('id, title, mode, subject, updated_at')
+        .order('updated_at', { ascending: false })
+      data = fallback.data
+      error = fallback.error
+    }
     if (!error) {
       const sorted = [...(data || [])].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
       setConversations(sorted)
@@ -929,6 +1001,7 @@ function Dashboard({ session }) {
       }
 
       const attachmentMarkdownParts = []
+      const filesForApi = []
       for (const file of filesToSend) {
         const ext = file.mimeType === 'application/pdf' ? 'pdf' : (file.mimeType.split('/')[1] || 'dat')
         const path = `${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
@@ -951,12 +1024,18 @@ function Dashboard({ session }) {
                 ? `![assignment image](${urlData.signedUrl})`
                 : `[📄 ${file.name || 'attached file'}](${urlData.signedUrl})`
             )
+            // Sent to /api/generate as a URL, not base64 — the backend fetches
+            // it server-side. Keeps the request tiny regardless of file size,
+            // which is what was breaking PDF uploads (Vercel's 4.5MB body cap).
+            filesForApi.push({ url: urlData.signedUrl, mimeType: file.mimeType })
           }
         }
       }
 
+      // Joined with a single space (not a blank-line paragraph break) so multiple
+      // attachments render inline together in one row instead of stacking full-width.
       const userContent = attachmentMarkdownParts.length
-        ? `${attachmentMarkdownParts.join('\n\n')}${userText ? '\n\n' + userText : ''}`
+        ? `${attachmentMarkdownParts.join(' ')}${userText ? '\n\n' + userText : ''}`
         : userText
 
       setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
@@ -975,7 +1054,7 @@ function Dashboard({ session }) {
           mode,
           assignmentText: userText,
           history,
-          images: filesToSend.map((f) => ({ base64: f.base64, mimeType: f.mimeType })),
+          images: filesForApi,
         }),
       })
       const data = await response.json()
@@ -1092,8 +1171,13 @@ function Dashboard({ session }) {
               {file.preview ? (
                 <img src={file.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
               ) : (
-                <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: c.subtext, textAlign: 'center', padding: '4px', overflow: 'hidden' }}>
-                  📄 {file.name || 'File'}
+                <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '4px', overflow: 'hidden' }}>
+                  <span style={{ fontSize: '0.6rem', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', backgroundColor: c.accent, color: c.accentText }}>
+                    {(file.name?.split('.').pop() || 'FILE').toUpperCase().slice(0, 4)}
+                  </span>
+                  <span style={{ fontSize: '0.6rem', color: c.subtext, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
+                    {file.name || 'File'}
+                  </span>
                 </div>
               )}
               <button
