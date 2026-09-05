@@ -1,7 +1,26 @@
-body {
+html, body, #root {
+  height: 100%;
   margin: 0;
+}
+
+body {
   background-color: #0f0f0f;
   color: #ffffff;
+  overscroll-behavior-y: none;
+}
+
+/* The core mobile layout fix: 100vh on phones counts the space behind the
+   browser's address bar, so the page becomes taller than what's actually
+   visible and the whole thing scrolls as one unit — that's why the input bar
+   was hidden until you swiped. 100dvh (dynamic viewport height) tracks the
+   real visible area instead. The plain 100vh line stays first as a fallback
+   for older browsers that don't understand dvh yet. Combined with
+   overflow: hidden here and minHeight: 0 on the scrolling messages area in
+   App.jsx, only the chat bubbles scroll — the top bar and input stay put. */
+.radius-app-shell {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 @keyframes fadeInUp {
