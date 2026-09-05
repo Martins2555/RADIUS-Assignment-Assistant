@@ -1002,6 +1002,7 @@ function Dashboard({ session }) {
 
       const attachmentMarkdownParts = []
       const filesForApi = []
+      const attachmentFailures = []
       for (const file of filesToSend) {
         const ext = file.mimeType === 'application/pdf' ? 'pdf' : (file.mimeType.split('/')[1] || 'dat')
         const path = `${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
@@ -1009,27 +1010,37 @@ function Dashboard({ session }) {
         const { error: uploadError } = await supabase.storage
           .from('assignment-images')
           .upload(path, blob, { contentType: file.mimeType })
-        if (!uploadError) {
-          // Signed URL instead of a public one — the bucket is private, so this is
-          // required for the link to work at all. Expiry is set very long (10 years)
-          // because the URL gets baked into the stored message content in Supabase;
-          // once a message is saved, there's no later point to re-sign it.
-          const { data: urlData, error: signError } = await supabase.storage
-            .from('assignment-images')
-            .createSignedUrl(path, 60 * 60 * 24 * 365 * 10)
-          if (!signError && urlData) {
-            const isImageAttachment = file.mimeType.startsWith('image/')
-            attachmentMarkdownParts.push(
-              isImageAttachment
-                ? `![assignment image](${urlData.signedUrl})`
-                : `[📄 ${file.name || 'attached file'}](${urlData.signedUrl})`
-            )
-            // Sent to /api/generate as a URL, not base64 — the backend fetches
-            // it server-side. Keeps the request tiny regardless of file size,
-            // which is what was breaking PDF uploads (Vercel's 4.5MB body cap).
-            filesForApi.push({ url: urlData.signedUrl, mimeType: file.mimeType })
-          }
+        if (uploadError) {
+          console.error('Attachment upload failed:', file.name, uploadError)
+          attachmentFailures.push(`"${file.name || 'file'}" didn't upload: ${uploadError.message}`)
+          continue
         }
+        // Signed URL instead of a public one — the bucket is private, so this is
+        // required for the link to work at all. Expiry is set very long (10 years)
+        // because the URL gets baked into the stored message content in Supabase;
+        // once a message is saved, there's no later point to re-sign it.
+        const { data: urlData, error: signError } = await supabase.storage
+          .from('assignment-images')
+          .createSignedUrl(path, 60 * 60 * 24 * 365 * 10)
+        if (signError || !urlData) {
+          console.error('Signed URL failed:', file.name, signError)
+          attachmentFailures.push(`"${file.name || 'file'}" uploaded but couldn't be linked: ${signError?.message || 'unknown error'}`)
+          continue
+        }
+        const isImageAttachment = file.mimeType.startsWith('image/')
+        attachmentMarkdownParts.push(
+          isImageAttachment
+            ? `![assignment image](${urlData.signedUrl})`
+            : `[📄 ${file.name || 'attached file'}](${urlData.signedUrl})`
+        )
+        // Sent to /api/generate as a URL, not base64 — the backend fetches
+        // it server-side. Keeps the request tiny regardless of file size,
+        // which is what was breaking PDF uploads (Vercel's 4.5MB body cap).
+        filesForApi.push({ url: urlData.signedUrl, mimeType: file.mimeType })
+      }
+
+      if (attachmentFailures.length) {
+        setError(attachmentFailures.join(' '))
       }
 
       // Joined with a single space (not a blank-line paragraph break) so multiple
