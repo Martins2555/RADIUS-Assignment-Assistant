@@ -98,6 +98,14 @@ function PencilIcon({ color }) {
   )
 }
 
+function PinIcon({ color, filled }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? color : 'none'}>
+      <path d="M12 2l2 6 6 2-6 4-1 8-1-8-6-4 6-2z" stroke={color} strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 // Free color choices for the chat accent. Kept simple and all-unlocked for now —
 // this is where a "premium" lock would slot in later once payment is wired up.
 const accentColors = {
@@ -287,6 +295,29 @@ function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor,
           ))}
         </div>
         <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.6rem' }}>More colors and custom backgrounds are coming with premium.</p>
+      </div>
+      <div style={{ marginTop: '2rem' }}>
+        <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>MEMBERSHIP</p>
+        <button
+          onClick={() => alert('Payment methods incoming — RADIUS Plus will be available soon!')}
+          style={{
+            width: '100%',
+            padding: '0.9rem 1rem',
+            borderRadius: '12px',
+            border: `1.5px solid ${c.accent}`,
+            background: `linear-gradient(135deg, ${c.accent}22, transparent)`,
+            color: c.text,
+            fontWeight: 'bold',
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <span>✨ Upgrade to RADIUS Plus</span>
+          <span style={{ fontSize: '0.75rem', color: c.subtext, fontWeight: 'normal' }}>Coming soon</span>
+        </button>
       </div>
       <button onClick={handleLogout} style={{ ...styles.logoutBtn, borderColor: c.border, color: '#ef4444', marginTop: '2.5rem' }}>Log Out</button>
     </div>
@@ -523,15 +554,19 @@ function ConversationRow({ conv, isActive, c, onSelect, onLongPress, isRenaming,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.4rem',
         ...noSelectStyle,
       }}
     >
-      {conv.title || 'New chat'}
+      {conv.is_pinned && <PinIcon color={c.accent} filled />}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{conv.title || 'New chat'}</span>
     </div>
   )
 }
 
-function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, onRenameConversation, onDeleteConversation, theme, accentColor, session }) {
+function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, onRenameConversation, onDeleteConversation, onTogglePin, theme, accentColor, session }) {
   const c = getPalette(theme, accentColor)
   const [rowMenu, setRowMenu] = useState(null)
   const [renamingId, setRenamingId] = useState(null)
@@ -555,9 +590,31 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
       onDeleteConversation(conv.id)
     }
   }
+  const togglePin = (conv) => {
+    setRowMenu(null)
+    onTogglePin(conv.id, !conv.is_pinned)
+  }
 
-  const menuTop = rowMenu && typeof window !== 'undefined' ? Math.min(rowMenu.y, window.innerHeight - 110) : rowMenu?.y
+  const menuTop = rowMenu && typeof window !== 'undefined' ? Math.min(rowMenu.y, window.innerHeight - 150) : rowMenu?.y
   const menuLeft = rowMenu && typeof window !== 'undefined' ? Math.min(rowMenu.x, window.innerWidth - 170) : rowMenu?.x
+
+  const pinnedConvs = conversations.filter((cv) => cv.is_pinned)
+  const recentConvs = conversations.filter((cv) => !cv.is_pinned)
+
+  const renderRow = (conv) => (
+    <ConversationRow
+      key={conv.id}
+      conv={conv}
+      isActive={conv.id === activeConversationId}
+      c={c}
+      onSelect={() => onSelectConversation(conv)}
+      onLongPress={(x, y, conv) => setRowMenu({ x, y, conv })}
+      isRenaming={renamingId === conv.id}
+      renameValue={renameValue}
+      onRenameChange={setRenameValue}
+      onRenameCommit={commitRename}
+    />
+  )
 
   return (
     <>
@@ -576,25 +633,19 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
           New chat
         </button>
 
-        <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 1rem 0.4rem' }}>RECENT</p>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 0.6rem' }}>
-          {conversations.length === 0 && (
+          {pinnedConvs.length > 0 && (
+            <>
+              <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 0.4rem 0.4rem' }}>PINNED</p>
+              {pinnedConvs.map(renderRow)}
+            </>
+          )}
+
+          <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 0.4rem 0.4rem' }}>RECENT</p>
+          {recentConvs.length === 0 && pinnedConvs.length === 0 && (
             <p style={{ color: c.subtext, fontSize: '0.85rem', padding: '0.6rem' }}>No chats yet</p>
           )}
-          {conversations.map((conv) => (
-            <ConversationRow
-              key={conv.id}
-              conv={conv}
-              isActive={conv.id === activeConversationId}
-              c={c}
-              onSelect={() => onSelectConversation(conv)}
-              onLongPress={(x, y, conv) => setRowMenu({ x, y, conv })}
-              isRenaming={renamingId === conv.id}
-              renameValue={renameValue}
-              onRenameChange={setRenameValue}
-              onRenameCommit={commitRename}
-            />
-          ))}
+          {recentConvs.map(renderRow)}
         </div>
 
         <div
@@ -628,6 +679,13 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
         <>
           <div onClick={() => setRowMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 65 }} />
           <div style={{ ...styles.attachMenu, position: 'fixed', top: menuTop, left: menuLeft, zIndex: 70, backgroundColor: c.bg, borderColor: c.border }}>
+            <button
+              type="button"
+              style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              onClick={() => togglePin(rowMenu.conv)}
+            >
+              <PinIcon color={c.text} /> {rowMenu.conv.is_pinned ? 'Unpin' : 'Pin'}
+            </button>
             <button
               type="button"
               style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
@@ -729,9 +787,25 @@ function Dashboard({ session }) {
   async function loadConversations() {
     const { data, error } = await supabase
       .from('conversations')
-      .select('id, title, mode, subject, updated_at')
+      .select('id, title, mode, subject, updated_at, is_pinned')
       .order('updated_at', { ascending: false })
-    if (!error) setConversations(data || [])
+    if (!error) {
+      const sorted = [...(data || [])].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
+      setConversations(sorted)
+    }
+  }
+
+  async function handleTogglePin(id, pinned) {
+    setConversations((prev) => {
+      const updated = prev.map((cv) => (cv.id === id ? { ...cv, is_pinned: pinned } : cv))
+      return [...updated].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
+    })
+    // Best-effort: no-ops quietly if the `is_pinned` column doesn't exist yet
+    try {
+      await supabase.from('conversations').update({ is_pinned: pinned }).eq('id', id)
+    } catch (e) {
+      // ignore — see comment above
+    }
   }
 
   async function openConversation(conv) {
@@ -915,6 +989,7 @@ function Dashboard({ session }) {
         onOpenSettings={() => { setSidebarOpen(false); setView('settings') }}
         onRenameConversation={handleRenameConversation}
         onDeleteConversation={handleDeleteConversation}
+        onTogglePin={handleTogglePin}
         theme={theme}
         accentColor={accentColor}
         session={session}
@@ -940,28 +1015,34 @@ function Dashboard({ session }) {
 
       <div style={styles.messagesArea}>
         {messages.length === 0 && !loading && (
-          <div style={{ textAlign: 'center', margin: 'auto' }}>
+          <div key={activeConversationId || 'new'} className="radius-entrance" style={{ textAlign: 'center', margin: 'auto' }}>
             <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>Welcome, {displayName}</p>
             <p style={{ color: c.subtext, marginTop: '0.4rem' }}>What assignment are we tackling today?</p>
           </div>
         )}
 
         {messages.map((m) => (
-          <MessageBubble
-            key={m.id}
-            id={m.id}
-            role={m.role}
-            content={m.content}
-            theme={theme}
-            accentColor={accentColor}
-            feedback={m.feedback}
-            onLongPress={(x, y, msg) => setLongPressMenu({ x, y, ...msg })}
-            onCopy={handleCopyText}
-            onFeedback={handleSetFeedback}
-          />
+          <div key={m.id} className="radius-entrance">
+            <MessageBubble
+              id={m.id}
+              role={m.role}
+              content={m.content}
+              theme={theme}
+              accentColor={accentColor}
+              feedback={m.feedback}
+              onLongPress={(x, y, msg) => setLongPressMenu({ x, y, ...msg })}
+              onCopy={handleCopyText}
+              onFeedback={handleSetFeedback}
+            />
+          </div>
         ))}
 
-        {loading && <p style={{ color: c.subtext, padding: '0.4rem 0' }}>Thinking through your assignment...</p>}
+        {loading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: c.subtext, padding: '0.4rem 0' }}>
+            <span className="radius-spinner" style={{ color: c.accent }} />
+            Thinking...
+          </div>
+        )}
         {error && <p style={{ color: '#ef4444', padding: '0.4rem 0', textAlign: 'center' }}>{error}</p>}
 
         <div ref={messagesEndRef} />
