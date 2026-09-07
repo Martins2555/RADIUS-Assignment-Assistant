@@ -80,8 +80,16 @@ function CameraIcon({ color }) {
 
 function SendIcon({ color }) {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M4 12l16-7-6 16-2.5-6.5L4 12z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M12 19V5M12 5l-6 6M12 5l6 6" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function StopIcon({ color }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <rect x="5" y="5" width="14" height="14" rx="2.5" fill={color} />
     </svg>
   )
 }
@@ -277,7 +285,7 @@ function AuthScreen() {
   )
 }
 
-function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, onBack }) {
+function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, enterToSend, setEnterToSend, onBack }) {
   const c = getPalette(theme, accentColor)
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -324,6 +332,44 @@ function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor,
           ))}
         </div>
         <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.6rem' }}>More colors and custom backgrounds are coming with premium.</p>
+      </div>
+      <div style={{ marginTop: '2rem' }}>
+        <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>MESSAGING</p>
+        <div
+          onClick={() => setEnterToSend(!enterToSend)}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '0.2rem 0' }}
+        >
+          <div>
+            <p style={{ margin: 0, fontSize: '0.95rem' }}>Enter key sends message</p>
+            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.75rem', color: c.subtext }}>
+              {enterToSend ? 'Enter sends — Shift+Enter for a new line' : 'Enter starts a new line — tap send to submit'}
+            </p>
+          </div>
+          <span
+            style={{
+              width: '42px',
+              height: '24px',
+              borderRadius: '12px',
+              backgroundColor: enterToSend ? c.accent : c.border,
+              position: 'relative',
+              flexShrink: 0,
+              transition: 'background-color 0.15s ease',
+            }}
+          >
+            <span
+              style={{
+                position: 'absolute',
+                top: '2px',
+                left: enterToSend ? '20px' : '2px',
+                width: '20px',
+                height: '20px',
+                borderRadius: '50%',
+                backgroundColor: '#fff',
+                transition: 'left 0.15s ease',
+              }}
+            />
+          </span>
+        </div>
       </div>
       <div style={{ marginTop: '2rem' }}>
         <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>MEMBERSHIP</p>
@@ -406,12 +452,18 @@ const noSelectStyle = { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouc
 function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback }) {
   const c = getPalette(theme, accentColor)
   const isUser = role === 'user'
+  // Only user messages get the custom long-press menu (copy/edit) — they have
+  // no action buttons below them. AI replies already have copy/feedback
+  // buttons right underneath, so long-pressing one now falls through to
+  // normal native text selection (highlight a word/phrase, drag handles,
+  // the OS's own copy popup) instead of our menu intercepting the gesture.
   const longPress = useLongPress((x, y) => onLongPress(x, y, { id, role, content }))
+  const pressHandlers = isUser ? longPress : {}
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.35rem' }}>
       <div
-        {...longPress}
+        {...pressHandlers}
         style={{
           maxWidth: '85%',
           padding: '0.7rem 1rem',
@@ -419,7 +471,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
           backgroundColor: isUser ? c.accent : c.surface,
           color: isUser ? c.accentText : c.text,
           border: isUser ? 'none' : `1px solid ${c.border}`,
-          ...noSelectStyle,
+          ...(isUser ? noSelectStyle : {}),
         }}
       >
         <div style={{ lineHeight: '1.6' }} className="radius-markdown">
@@ -428,70 +480,8 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
             rehypePlugins={[rehypeKatex]}
             components={{
               img: (props) => (
-                <a href={props.src} target="_blank" rel="noreferrer">
-                  <img
-                    {...props}
-                    style={{
-                      width: '104px',
-                      height: '104px',
-                      objectFit: 'cover',
-                      borderRadius: '10px',
-                      margin: '3px',
-                      display: 'inline-block',
-                      verticalAlign: 'middle',
-                      border: `1px solid ${isUser ? 'rgba(0,0,0,0.15)' : c.border}`,
-                    }}
-                  />
-                </a>
+                <img {...props} style={{ maxWidth: '100%', borderRadius: '10px', marginTop: '0.4rem', display: 'block' }} />
               ),
-              a: (props) => {
-                const raw = Array.isArray(props.children) ? props.children.join('') : String(props.children ?? '')
-                if (raw.startsWith('📄 ')) {
-                  const label = raw.slice(2).trim()
-                  const ext = (label.includes('.') ? label.split('.').pop() : 'FILE').toUpperCase().slice(0, 4)
-                  return (
-                    <a
-                      href={props.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        textDecoration: 'none',
-                        color: 'inherit',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        padding: '0.45rem 0.7rem',
-                        borderRadius: '10px',
-                        border: '1.5px solid currentColor',
-                        opacity: 0.95,
-                        maxWidth: '190px',
-                        margin: '3px',
-                        verticalAlign: 'middle',
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: '0.6rem',
-                          fontWeight: 'bold',
-                          padding: '2px 5px',
-                          borderRadius: '4px',
-                          backgroundColor: 'currentColor',
-                          color: isUser ? c.accent : c.bg,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {ext}
-                      </span>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem' }}>{label}</span>
-                    </a>
-                  )
-                }
-                return (
-                  <a href={props.href} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>
-                    {props.children}
-                  </a>
-                )
-              },
               p: (props) => <p {...props} style={{ margin: '0 0 0.5rem 0' }} />,
             }}
           >
@@ -814,6 +804,7 @@ function Dashboard({ session }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
   const [longPressMenu, setLongPressMenu] = useState(null)
+  const [enterToSend, setEnterToSend] = useState(() => localStorage.getItem('radius-enter-to-send') === 'true')
 
   const c = getPalette(theme, accentColor)
   const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
@@ -822,6 +813,7 @@ function Dashboard({ session }) {
   const photosInputRef = useRef(null)
   const filesInputRef = useRef(null)
   const cameraInputRef = useRef(null)
+  const abortControllerRef = useRef(null)
 
   useEffect(() => {
     loadConversations()
@@ -834,6 +826,10 @@ function Dashboard({ session }) {
   useEffect(() => {
     localStorage.setItem('radius-accent', accentColor)
   }, [accentColor])
+
+  useEffect(() => {
+    localStorage.setItem('radius-enter-to-send', String(enterToSend))
+  }, [enterToSend])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -876,20 +872,10 @@ function Dashboard({ session }) {
   }
 
   async function loadConversations() {
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('conversations')
       .select('id, title, mode, subject, updated_at, is_pinned')
       .order('updated_at', { ascending: false })
-    if (error) {
-      // `is_pinned` likely doesn't exist on the live table yet — fall back
-      // so the whole history list doesn't silently disappear because of it.
-      const fallback = await supabase
-        .from('conversations')
-        .select('id, title, mode, subject, updated_at')
-        .order('updated_at', { ascending: false })
-      data = fallback.data
-      error = fallback.error
-    }
     if (!error) {
       const sorted = [...(data || [])].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
       setConversations(sorted)
@@ -1001,8 +987,7 @@ function Dashboard({ session }) {
       }
 
       const attachmentMarkdownParts = []
-      const filesForApi = []
-      const attachmentFailures = []
+      const uploadedImages = []
       for (const file of filesToSend) {
         const ext = file.mimeType === 'application/pdf' ? 'pdf' : (file.mimeType.split('/')[1] || 'dat')
         const path = `${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
@@ -1010,49 +995,41 @@ function Dashboard({ session }) {
         const { error: uploadError } = await supabase.storage
           .from('assignment-images')
           .upload(path, blob, { contentType: file.mimeType })
-        if (uploadError) {
-          console.error('Attachment upload failed:', file.name, uploadError)
-          attachmentFailures.push(`"${file.name || 'file'}" didn't upload: ${uploadError.message}`)
-          continue
+        if (!uploadError) {
+          // Signed URL instead of a public one — the bucket is private, so this is
+          // required for the link to work at all. Expiry is set very long (10 years)
+          // because the URL gets baked into the stored message content in Supabase;
+          // once a message is saved, there's no later point to re-sign it.
+          const { data: urlData, error: signError } = await supabase.storage
+            .from('assignment-images')
+            .createSignedUrl(path, 60 * 60 * 24 * 365 * 10)
+          if (!signError && urlData) {
+            const isImageAttachment = file.mimeType.startsWith('image/')
+            attachmentMarkdownParts.push(
+              isImageAttachment
+                ? `![assignment image](${urlData.signedUrl})`
+                : `[📄 ${file.name || 'attached file'}](${urlData.signedUrl})`
+            )
+            // The backend now fetches each file server-side from this URL
+            // rather than receiving it as base64 in the request body —
+            // Vercel caps incoming request bodies at 4.5MB, which a
+            // base64-encoded PDF or a few images could exceed.
+            uploadedImages.push({ url: urlData.signedUrl, mimeType: file.mimeType })
+          }
         }
-        // Signed URL instead of a public one — the bucket is private, so this is
-        // required for the link to work at all. Expiry is set very long (10 years)
-        // because the URL gets baked into the stored message content in Supabase;
-        // once a message is saved, there's no later point to re-sign it.
-        const { data: urlData, error: signError } = await supabase.storage
-          .from('assignment-images')
-          .createSignedUrl(path, 60 * 60 * 24 * 365 * 10)
-        if (signError || !urlData) {
-          console.error('Signed URL failed:', file.name, signError)
-          attachmentFailures.push(`"${file.name || 'file'}" uploaded but couldn't be linked: ${signError?.message || 'unknown error'}`)
-          continue
-        }
-        const isImageAttachment = file.mimeType.startsWith('image/')
-        attachmentMarkdownParts.push(
-          isImageAttachment
-            ? `![assignment image](${urlData.signedUrl})`
-            : `[📄 ${file.name || 'attached file'}](${urlData.signedUrl})`
-        )
-        // Sent to /api/generate as a URL, not base64 — the backend fetches
-        // it server-side. Keeps the request tiny regardless of file size,
-        // which is what was breaking PDF uploads (Vercel's 4.5MB body cap).
-        filesForApi.push({ url: urlData.signedUrl, mimeType: file.mimeType })
       }
 
-      if (attachmentFailures.length) {
-        setError(attachmentFailures.join(' '))
-      }
-
-      // Joined with a single space (not a blank-line paragraph break) so multiple
-      // attachments render inline together in one row instead of stacking full-width.
       const userContent = attachmentMarkdownParts.length
-        ? `${attachmentMarkdownParts.join(' ')}${userText ? '\n\n' + userText : ''}`
+        ? `${attachmentMarkdownParts.join('\n\n')}${userText ? '\n\n' + userText : ''}`
         : userText
 
       setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userContent })
 
       const history = messages.map((m) => ({ role: m.role, content: m.content }))
+
+      const controller = new AbortController()
+      abortControllerRef.current = controller
 
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -1065,8 +1042,9 @@ function Dashboard({ session }) {
           mode,
           assignmentText: userText,
           history,
-          images: filesForApi,
+          images: uploadedImages,
         }),
+        signal: controller.signal,
       })
       const data = await response.json()
 
@@ -1078,9 +1056,17 @@ function Dashboard({ session }) {
         loadConversations()
       }
     } catch (err) {
-      setError(err.message || 'Network error. Please try again.')
+      // A user-initiated stop shows no error — that's expected, not a failure.
+      if (err.name !== 'AbortError') {
+        setError(err.message || 'Network error. Please try again.')
+      }
     }
+    abortControllerRef.current = null
     setLoading(false)
+  }
+
+  const handleStopGenerating = () => {
+    abortControllerRef.current?.abort()
   }
 
   if (view === 'settings') {
@@ -1091,6 +1077,8 @@ function Dashboard({ session }) {
         setTheme={setTheme}
         accentColor={accentColor}
         setAccentColor={setAccentColor}
+        enterToSend={enterToSend}
+        setEnterToSend={setEnterToSend}
         onBack={() => setView('main')}
       />
     )
@@ -1182,13 +1170,8 @@ function Dashboard({ session }) {
               {file.preview ? (
                 <img src={file.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
               ) : (
-                <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '4px', overflow: 'hidden' }}>
-                  <span style={{ fontSize: '0.6rem', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', backgroundColor: c.accent, color: c.accentText }}>
-                    {(file.name?.split('.').pop() || 'FILE').toUpperCase().slice(0, 4)}
-                  </span>
-                  <span style={{ fontSize: '0.6rem', color: c.subtext, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
-                    {file.name || 'File'}
-                  </span>
+                <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: c.subtext, textAlign: 'center', padding: '4px', overflow: 'hidden' }}>
+                  📄 {file.name || 'File'}
                 </div>
               )}
               <button
@@ -1261,16 +1244,36 @@ function Dashboard({ session }) {
             el.style.height = Math.min(el.scrollHeight, 150) + 'px'
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey && enterToSend) {
               e.preventDefault()
               e.currentTarget.form?.requestSubmit()
             }
           }}
           style={{ ...styles.bottomInput, color: c.text }}
         />
-        <button type="submit" disabled={loading} style={styles.sendBtn}>
-          <SendIcon color={c.accent} />
-        </button>
+        {loading ? (
+          <button
+            type="button"
+            onClick={handleStopGenerating}
+            style={{ ...styles.sendBtn, backgroundColor: c.text }}
+            aria-label="Stop generating"
+          >
+            <StopIcon color={c.bg} />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!assignmentText.trim() && attachedFiles.length === 0}
+            style={{
+              ...styles.sendBtn,
+              backgroundColor: c.accent,
+              opacity: !assignmentText.trim() && attachedFiles.length === 0 ? 0.4 : 1,
+            }}
+            aria-label="Send"
+          >
+            <SendIcon color={c.accentText} />
+          </button>
+        )}
       </form>
     </div>
   )
@@ -1394,7 +1397,7 @@ const styles = {
   attachMenuItem: { display: 'flex', alignItems: 'center', gap: '0.7rem', padding: '0.55rem 0.5rem', borderRadius: '10px', cursor: 'pointer', fontSize: '0.9rem' },
   attachMenuIconWrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0 },
   bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem', fontFamily: 'inherit', resize: 'none', overflowY: 'auto', maxHeight: '150px', lineHeight: '1.4', padding: '0.4rem 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
-  sendBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.3rem' },
+  sendBtn: { border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '38px', height: '38px', borderRadius: '50%', flexShrink: 0, transition: 'opacity 0.15s ease' },
   themeBtn: { flex: 1, padding: '0.6rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
   logoutBtn: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 'bold' },
   sidebarOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 40 },
