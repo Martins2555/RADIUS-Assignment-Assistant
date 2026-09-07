@@ -36,6 +36,27 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Invalid or expired session' })
   }
 
+  // Per-user rate limit: 20 requests/hour, enforced atomically in Postgres via
+  // the check_rate_limit() function (see the SQL migration for it). Scoped
+  // with the user's own forwarded JWT (not a service-role key) so it only
+  // ever touches that user's own row, same trust model as the auth check
+  // above. Fails open if the function/table doesn't exist yet or errors for
+  // any other reason - a missing migration shouldn't take the whole app down.
+  const supabaseAsUser = createClient(
+    process.env.VITE_SUPABASE_URL,
+    process.env.VITE_SUPABASE_ANON_KEY,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  )
+  const { data: rateLimitOk, error: rateLimitError } = await supabaseAsUser.rpc('check_rate_limit', {
+    p_limit: 20,
+    p_window_minutes: 60,
+  })
+  if (rateLimitError) {
+    console.error('Rate limit check errored (failing open):', rateLimitError.message)
+  } else if (rateLimitOk === false) {
+    return res.status(429).json({ error: "You've hit the hourly limit for assignment requests. Please wait a bit and try again." })
+  }
+
   const { subject, mode, assignmentText, history, images } = req.body
   const imageList = Array.isArray(images) ? images.slice(0, 10) : []
 
@@ -104,7 +125,10 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
   currentParts.push(...fetchedParts.filter(Boolean))
   contents.push({ role: 'user', parts: currentParts })
 
-  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`
+  // gemini-3.6-flash is a preview-tier model with tighter rate limits per
+  // Google's own docs - 3.7 Flash is the generally-available successor in the
+  // same family and should relieve the 429 pressure seen earlier.
+  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${apiKey}`
   const requestBody = JSON.stringify({
     system_instruction: { parts: [{ text: systemInstruction }] },
     contents,
