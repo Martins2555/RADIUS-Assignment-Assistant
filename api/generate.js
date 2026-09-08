@@ -154,7 +154,10 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
       })
       const data = await response.json()
 
-      if (response.status !== 429 || attempt === maxRetries) {
+      // 503 = model temporarily overloaded on Google's end - just as worth
+      // retrying with backoff as 429 (rate limited). Both are transient.
+      const isRetryable = response.status === 429 || response.status === 503
+      if (!isRetryable || attempt === maxRetries) {
         return { response, data }
       }
 
@@ -173,7 +176,14 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
       if (response.status === 429) {
         return res.status(429).json({ error: 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.' })
       }
-      return res.status(response.status).json({ error: data.error?.message || 'Gemini API error' })
+      if (response.status === 503) {
+        return res.status(503).json({ error: 'RADIUS is briefly overloaded. Please try again in a few seconds.' })
+      }
+      // Never leak the raw upstream error message to the user - it can be
+      // oddly specific/internal-sounding. Full detail still goes to the
+      // Vercel logs for debugging.
+      console.error('Gemini API error:', response.status, data?.error?.message)
+      return res.status(response.status).json({ error: "Something went wrong on RADIUS's end. Please try again." })
     }
 
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.'
@@ -182,4 +192,4 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
   } catch (err) {
     return res.status(500).json({ error: err.message })
   }
-        }
+}
