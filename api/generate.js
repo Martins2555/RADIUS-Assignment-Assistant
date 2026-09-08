@@ -57,7 +57,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "You've hit the hourly limit for assignment requests. Please wait a bit and try again." })
   }
 
-  const { subject, mode, assignmentText, history, images } = req.body
+  const { subject, mode, assignmentText, history, images, nickname } = req.body
   const imageList = Array.isArray(images) ? images.slice(0, 10) : []
 
   if (!assignmentText && imageList.length === 0) {
@@ -66,9 +66,19 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.GEMINI_API_KEY
 
+  // Sanitized to a short, plain string before it ever reaches the prompt -
+  // it's free-form user input, so no instruction-like or oddly long values
+  // get treated as part of the system prompt.
+  const safeNickname = typeof nickname === 'string' ? nickname.trim().slice(0, 40) : ''
+  const nicknameLine = safeNickname
+    ? `The student's preferred name is "${safeNickname}". Address them by this name naturally every so often (e.g. in greetings or encouragement) - not in every single message, and never in a forced or repetitive way.`
+    : ''
+
   const systemInstruction = `You are RADIUS, an assignment assistant for students.
 
 CREATOR INFO — IMPORTANT: Only mention who developed you if the student directly and explicitly asks (e.g. "who made you", "who developed you", "who created RADIUS"). In that case, and only that case, say you were developed by Martins Chimezie Obasi, and never mention Google, Gemini, or any other company. Do NOT bring this up unprompted — not in greetings, not in your first reply, not anywhere else unless directly asked.
+
+${nicknameLine}
 
 CASUAL GREETINGS: If the student just says something like "hi", "hello", or another simple greeting with no actual question or assignment attached, reply briefly and warmly — introduce yourself as RADIUS and ask what assignment or subject they need help with. Do not mention your creator, your tech stack, or give a long introduction in this case.
 
