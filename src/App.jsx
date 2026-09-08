@@ -80,16 +80,8 @@ function CameraIcon({ color }) {
 
 function SendIcon({ color }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M12 19V5M12 5l-6 6M12 5l6 6" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function StopIcon({ color }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <rect x="5" y="5" width="14" height="14" rx="2.5" fill={color} />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M4 12l16-7-6 16-2.5-6.5L4 12z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -139,6 +131,22 @@ function PinIcon({ color, filled }) {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? color : 'none'}>
       <path d="M12 2l2 6 6 2-6 4-1 8-1-8-6-4 6-2z" stroke={color} strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function XSocialIcon({ color }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill={color}>
+      <path d="M18.9 2.4h3.3l-7.2 8.2 8.5 11h-6.6l-5.2-6.8-5.9 6.8H2.4l7.7-8.8L2 2.4h6.8l4.7 6.2zM17.7 19.6h1.8L7.4 4.3H5.5z" />
+    </svg>
+  )
+}
+
+function FlameIcon({ color }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill={color}>
+      <path d="M12 2c1 3-3 4.5-3 8a3 3 0 0 0 6 0c0-1-.4-1.8-1-2.5 2 1 3.5 3.3 3.5 5.8a5.5 5.5 0 0 1-11 0C6.5 9 9 6.5 12 2z" />
     </svg>
   )
 }
@@ -285,7 +293,66 @@ function AuthScreen() {
   )
 }
 
-function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, enterToSend, setEnterToSend, onBack }) {
+function NicknamePrompt({ theme, accentColor, onSave, onSkip }) {
+  const c = getPalette(theme, accentColor)
+  const [value, setValue] = useState('')
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        zIndex: 90,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1.2rem',
+      }}
+    >
+      <div style={{ backgroundColor: c.surface, border: `1px solid ${c.border}`, borderRadius: '16px', padding: '1.4rem', maxWidth: '340px', width: '100%' }}>
+        <p style={{ fontSize: '1.05rem', fontWeight: 'bold', color: c.text, margin: '0 0 0.4rem' }}>What should I call you?</p>
+        <p style={{ fontSize: '0.85rem', color: c.subtext, margin: '0 0 1rem' }}>
+          RADIUS will use this to address you, instead of your email.
+        </p>
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="e.g. Martins"
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            padding: '0.7rem 0.9rem',
+            borderRadius: '10px',
+            border: `1px solid ${c.border}`,
+            backgroundColor: c.bg,
+            color: c.text,
+            fontSize: '0.95rem',
+            marginBottom: '1rem',
+            outline: 'none',
+          }}
+        />
+        <div style={{ display: 'flex', gap: '0.6rem' }}>
+          <button
+            onClick={onSkip}
+            style={{ flex: 1, padding: '0.7rem', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: 'transparent', color: c.subtext, cursor: 'pointer', fontSize: '0.9rem' }}
+          >
+            Skip for now
+          </button>
+          <button
+            onClick={() => value.trim() && onSave(value.trim())}
+            style={{ flex: 1, padding: '0.7rem', borderRadius: '10px', border: 'none', backgroundColor: c.accent, color: c.accentText, fontWeight: 'bold', cursor: 'pointer', fontSize: '0.9rem' }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onAvatarChange, avatarInputRef, onBack }) {
   const c = getPalette(theme, accentColor)
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -298,16 +365,162 @@ function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor,
         <span style={{ fontWeight: 'bold' }}>Settings</span>
         <div style={{ width: '22px' }} />
       </div>
-      <p style={{ color: c.subtext, marginTop: '1.5rem' }}>{session.user.email}</p>
-      <div style={{ marginTop: '2rem' }}>
-        <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>APPEARANCE</p>
-        <div style={{ display: 'flex', gap: '0.6rem' }}>
-          <button onClick={() => setTheme('dark')} style={{ ...styles.themeBtn, borderColor: theme === 'dark' ? c.accent : c.border, color: c.text }}>Dark</button>
-          <button onClick={() => setTheme('light')} style={{ ...styles.themeBtn, borderColor: theme === 'light' ? c.accent : c.border, color: c.text }}>Light</button>
+
+      <SettingsBody
+        session={session}
+        theme={theme}
+        setTheme={setTheme}
+        accentColor={accentColor}
+        setAccentColor={setAccentColor}
+        profile={profile}
+        onSaveNickname={onSaveNickname}
+        onAvatarChange={onAvatarChange}
+        avatarInputRef={avatarInputRef}
+        onLogout={handleLogout}
+        c={c}
+      />
+    </div>
+  )
+}
+
+function SettingsCard({ c, children, style }) {
+  return (
+    <div style={{ backgroundColor: c.surface, border: `1px solid ${c.border}`, borderRadius: '16px', padding: '1.2rem', marginBottom: '1rem', ...style }}>
+      {children}
+    </div>
+  )
+}
+
+function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onAvatarChange, avatarInputRef, onLogout, c }) {
+  const [nicknameDraft, setNicknameDraft] = useState(profile?.nickname || '')
+  const nicknameChanged = nicknameDraft.trim() && nicknameDraft.trim() !== (profile?.nickname || '')
+  const initial = (profile?.nickname || session.user.email || '?')[0].toUpperCase()
+
+  return (
+    <div style={{ padding: '1.2rem 1rem 2rem' }}>
+      {/* Profile header */}
+      <SettingsCard c={c} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div
+            onClick={() => avatarInputRef.current?.click()}
+            style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '50%',
+              backgroundColor: c.accent,
+              backgroundImage: profile?.avatar_url ? `url(${profile.avatar_url})` : 'none',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: c.accentText,
+              fontSize: '1.4rem',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              border: `2px solid ${c.border}`,
+            }}
+          >
+            {!profile?.avatar_url && initial}
+          </div>
+          <div
+            onClick={() => avatarInputRef.current?.click()}
+            style={{
+              position: 'absolute',
+              bottom: -2,
+              right: -2,
+              width: '24px',
+              height: '24px',
+              borderRadius: '50%',
+              backgroundColor: c.bg,
+              border: `1.5px solid ${c.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <CameraIcon color={c.text} />
+          </div>
+          <input ref={avatarInputRef} type="file" accept="image/*" onChange={onAvatarChange} style={{ display: 'none' }} />
         </div>
-      </div>
-      <div style={{ marginTop: '2rem' }}>
-        <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>CHAT COLOR</p>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              value={nicknameDraft}
+              onChange={(e) => setNicknameDraft(e.target.value)}
+              placeholder="Add a nickname"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '0.5rem 0.7rem',
+                borderRadius: '8px',
+                border: `1px solid ${c.border}`,
+                backgroundColor: c.bg,
+                color: c.text,
+                fontSize: '0.9rem',
+                outline: 'none',
+              }}
+            />
+            {nicknameChanged && (
+              <button
+                onClick={() => onSaveNickname(nicknameDraft.trim())}
+                style={{ padding: '0.5rem 0.8rem', borderRadius: '8px', border: 'none', backgroundColor: c.accent, color: c.accentText, fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer' }}
+              >
+                Save
+              </button>
+            )}
+          </div>
+          <p style={{ color: c.subtext, fontSize: '0.78rem', margin: '0.5rem 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {session.user.email}
+          </p>
+        </div>
+      </SettingsCard>
+
+      {/* Streak */}
+      <SettingsCard c={c} style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+        <div style={{ width: '38px', height: '38px', borderRadius: '10px', backgroundColor: `${c.accent}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <FlameIcon color={c.accent} />
+        </div>
+        <div>
+          <p style={{ margin: 0, fontWeight: 'bold', color: c.text, fontSize: '0.95rem' }}>
+            {profile?.streak_count > 0 ? `${profile.streak_count}-day streak` : 'No streak yet'}
+          </p>
+          <p style={{ margin: '2px 0 0', color: c.subtext, fontSize: '0.78rem' }}>Use RADIUS at least once a day to keep it going. Just for you — not shared or ranked.</p>
+        </div>
+      </SettingsCard>
+
+      {/* Appearance */}
+      <SettingsCard c={c}>
+        <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '0 0 0.7rem' }}>APPEARANCE</p>
+        <div style={{ display: 'flex', backgroundColor: c.bg, borderRadius: '12px', padding: '4px', border: `1px solid ${c.border}` }}>
+          {[
+            { key: 'dark', label: '🌙 Dark' },
+            { key: 'light', label: '☀️ Light' },
+          ].map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => setTheme(opt.key)}
+              style={{
+                flex: 1,
+                padding: '0.6rem 0',
+                borderRadius: '9px',
+                border: 'none',
+                backgroundColor: theme === opt.key ? c.accent : 'transparent',
+                color: theme === opt.key ? c.accentText : c.subtext,
+                fontWeight: theme === opt.key ? 'bold' : 'normal',
+                fontSize: '0.88rem',
+                cursor: 'pointer',
+                transition: 'background-color 0.15s',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '1.3rem 0 0.7rem' }}>CHAT COLOR</p>
         <div style={{ display: 'flex', gap: '0.7rem' }}>
           {accentOrder.map((key) => (
             <button
@@ -331,56 +544,18 @@ function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor,
             </button>
           ))}
         </div>
-        <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.6rem' }}>More colors and custom backgrounds are coming with premium.</p>
-      </div>
-      <div style={{ marginTop: '2rem' }}>
-        <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>MESSAGING</p>
-        <div
-          onClick={() => setEnterToSend(!enterToSend)}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '0.2rem 0' }}
-        >
-          <div>
-            <p style={{ margin: 0, fontSize: '0.95rem' }}>Enter key sends message</p>
-            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.75rem', color: c.subtext }}>
-              {enterToSend ? 'Enter sends — Shift+Enter for a new line' : 'Enter starts a new line — tap send to submit'}
-            </p>
-          </div>
-          <span
-            style={{
-              width: '42px',
-              height: '24px',
-              borderRadius: '12px',
-              backgroundColor: enterToSend ? c.accent : c.border,
-              position: 'relative',
-              flexShrink: 0,
-              transition: 'background-color 0.15s ease',
-            }}
-          >
-            <span
-              style={{
-                position: 'absolute',
-                top: '2px',
-                left: enterToSend ? '20px' : '2px',
-                width: '20px',
-                height: '20px',
-                borderRadius: '50%',
-                backgroundColor: '#fff',
-                transition: 'left 0.15s ease',
-              }}
-            />
-          </span>
-        </div>
-      </div>
-      <div style={{ marginTop: '2rem' }}>
-        <p style={{ color: c.subtext, fontSize: '0.85rem', marginBottom: '0.6rem' }}>MEMBERSHIP</p>
+        <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.7rem' }}>More colors and custom backgrounds are coming with premium.</p>
+      </SettingsCard>
+
+      {/* Membership */}
+      <SettingsCard c={c} style={{ padding: 0, overflow: 'hidden' }}>
         <button
           onClick={() => alert('Payment methods incoming — RADIUS Plus will be available soon!')}
           style={{
             width: '100%',
-            padding: '0.9rem 1rem',
-            borderRadius: '12px',
-            border: `1.5px solid ${c.accent}`,
-            background: `linear-gradient(135deg, ${c.accent}22, transparent)`,
+            padding: '1rem 1.2rem',
+            border: 'none',
+            background: `linear-gradient(135deg, ${c.accent}26, transparent)`,
             color: c.text,
             fontWeight: 'bold',
             fontSize: '0.95rem',
@@ -393,8 +568,38 @@ function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor,
           <span>✨ Upgrade to RADIUS Plus</span>
           <span style={{ fontSize: '0.75rem', color: c.subtext, fontWeight: 'normal' }}>Coming soon</span>
         </button>
-      </div>
-      <button onClick={handleLogout} style={{ ...styles.logoutBtn, borderColor: c.border, color: '#ef4444', marginTop: '2.5rem' }}>Log Out</button>
+      </SettingsCard>
+
+      {/* Socials */}
+      <SettingsCard c={c}>
+        <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '0 0 0.7rem' }}>OFFICIAL HANDLES</p>
+        <a
+          href="https://x.com/RadiusAI"
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.7rem',
+            padding: '0.7rem',
+            borderRadius: '10px',
+            backgroundColor: c.bg,
+            border: `1px solid ${c.border}`,
+            color: c.text,
+            textDecoration: 'none',
+            fontSize: '0.9rem',
+          }}
+        >
+          <div style={{ width: '30px', height: '30px', borderRadius: '50%', backgroundColor: theme === 'dark' ? '#fff' : '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <XSocialIcon color={theme === 'dark' ? '#000' : '#fff'} />
+          </div>
+          <span>@RadiusAI on X</span>
+        </a>
+      </SettingsCard>
+
+      <button onClick={onLogout} style={{ ...styles.logoutBtn, borderColor: c.border, color: '#ef4444', width: '100%', boxSizing: 'border-box' }}>
+        Log Out
+      </button>
     </div>
   )
 }
@@ -452,18 +657,12 @@ const noSelectStyle = { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouc
 function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback }) {
   const c = getPalette(theme, accentColor)
   const isUser = role === 'user'
-  // Only user messages get the custom long-press menu (copy/edit) — they have
-  // no action buttons below them. AI replies already have copy/feedback
-  // buttons right underneath, so long-pressing one now falls through to
-  // normal native text selection (highlight a word/phrase, drag handles,
-  // the OS's own copy popup) instead of our menu intercepting the gesture.
   const longPress = useLongPress((x, y) => onLongPress(x, y, { id, role, content }))
-  const pressHandlers = isUser ? longPress : {}
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.35rem' }}>
       <div
-        {...pressHandlers}
+        {...longPress}
         style={{
           maxWidth: '85%',
           padding: '0.7rem 1rem',
@@ -471,7 +670,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
           backgroundColor: isUser ? c.accent : c.surface,
           color: isUser ? c.accentText : c.text,
           border: isUser ? 'none' : `1px solid ${c.border}`,
-          ...(isUser ? noSelectStyle : {}),
+          ...noSelectStyle,
         }}
       >
         <div style={{ lineHeight: '1.6' }} className="radius-markdown">
@@ -480,8 +679,70 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
             rehypePlugins={[rehypeKatex]}
             components={{
               img: (props) => (
-                <img {...props} style={{ maxWidth: '100%', borderRadius: '10px', marginTop: '0.4rem', display: 'block' }} />
+                <a href={props.src} target="_blank" rel="noreferrer">
+                  <img
+                    {...props}
+                    style={{
+                      width: '104px',
+                      height: '104px',
+                      objectFit: 'cover',
+                      borderRadius: '10px',
+                      margin: '3px',
+                      display: 'inline-block',
+                      verticalAlign: 'middle',
+                      border: `1px solid ${isUser ? 'rgba(0,0,0,0.15)' : c.border}`,
+                    }}
+                  />
+                </a>
               ),
+              a: (props) => {
+                const raw = Array.isArray(props.children) ? props.children.join('') : String(props.children ?? '')
+                if (raw.startsWith('📄 ')) {
+                  const label = raw.slice(2).trim()
+                  const ext = (label.includes('.') ? label.split('.').pop() : 'FILE').toUpperCase().slice(0, 4)
+                  return (
+                    <a
+                      href={props.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.45rem 0.7rem',
+                        borderRadius: '10px',
+                        border: '1.5px solid currentColor',
+                        opacity: 0.95,
+                        maxWidth: '190px',
+                        margin: '3px',
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: '0.6rem',
+                          fontWeight: 'bold',
+                          padding: '2px 5px',
+                          borderRadius: '4px',
+                          backgroundColor: 'currentColor',
+                          color: isUser ? c.accent : c.bg,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {ext}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem' }}>{label}</span>
+                    </a>
+                  )
+                }
+                return (
+                  <a href={props.href} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>
+                    {props.children}
+                  </a>
+                )
+              },
               p: (props) => <p {...props} style={{ margin: '0 0 0.5rem 0' }} />,
             }}
           >
@@ -804,19 +1065,21 @@ function Dashboard({ session }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
   const [longPressMenu, setLongPressMenu] = useState(null)
-  const [enterToSend, setEnterToSend] = useState(() => localStorage.getItem('radius-enter-to-send') === 'true')
+  const [profile, setProfile] = useState(null)
+  const [showNicknamePrompt, setShowNicknamePrompt] = useState(false)
 
   const c = getPalette(theme, accentColor)
-  const displayName = session.user.user_metadata?.full_name || session.user.email.split('@')[0]
+  const displayName = profile?.nickname || session.user.user_metadata?.full_name || session.user.email.split('@')[0]
   const messagesEndRef = useRef(null)
   const textAreaRef = useRef(null)
   const photosInputRef = useRef(null)
   const filesInputRef = useRef(null)
   const cameraInputRef = useRef(null)
-  const abortControllerRef = useRef(null)
+  const avatarInputRef = useRef(null)
 
   useEffect(() => {
     loadConversations()
+    loadProfile()
   }, [])
 
   useEffect(() => {
@@ -826,10 +1089,6 @@ function Dashboard({ session }) {
   useEffect(() => {
     localStorage.setItem('radius-accent', accentColor)
   }, [accentColor])
-
-  useEffect(() => {
-    localStorage.setItem('radius-enter-to-send', String(enterToSend))
-  }, [enterToSend])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -871,11 +1130,85 @@ function Dashboard({ session }) {
     await supabase.from('conversations').delete().eq('id', id)
   }
 
+  async function loadProfile() {
+    // Best-effort: if the `profiles` table/migration hasn't been run yet,
+    // this just no-ops and the app carries on using email as the display name.
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('nickname, avatar_url, streak_count, last_active_date')
+        .eq('user_id', session.user.id)
+        .maybeSingle()
+      if (!error) {
+        setProfile(data || { nickname: null, avatar_url: null, streak_count: 0 })
+        if (!data?.nickname) setShowNicknamePrompt(true)
+      }
+    } catch (e) {
+      // ignore — see comment above
+    }
+  }
+
+  async function handleSaveNickname(nickname) {
+    setShowNicknamePrompt(false)
+    setProfile((prev) => ({ ...(prev || {}), nickname }))
+    try {
+      await supabase.from('profiles').upsert({ user_id: session.user.id, nickname })
+    } catch (e) {
+      // best-effort — see loadProfile comment
+    }
+  }
+
+  async function handleAvatarChange(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const ext = (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
+    const path = `${session.user.id}/avatar.${ext}`
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(path, file, { contentType: file.type, upsert: true })
+    if (uploadError) {
+      setError(`Couldn't update profile picture: ${uploadError.message}`)
+      return
+    }
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+    // Cache-bust so the new image shows immediately instead of the browser's
+    // cached copy of the old one at the same URL.
+    const avatar_url = `${data.publicUrl}?t=${Date.now()}`
+    setProfile((prev) => ({ ...(prev || {}), avatar_url }))
+    try {
+      await supabase.from('profiles').upsert({ user_id: session.user.id, avatar_url })
+    } catch (e) {
+      // best-effort
+    }
+  }
+
+  async function touchStreak() {
+    try {
+      const { data, error } = await supabase.rpc('touch_daily_streak')
+      if (!error && typeof data === 'number') {
+        setProfile((prev) => ({ ...(prev || {}), streak_count: data }))
+      }
+    } catch (e) {
+      // best-effort — streak is a nice-to-have, never blocks the app
+    }
+  }
+
   async function loadConversations() {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('conversations')
       .select('id, title, mode, subject, updated_at, is_pinned')
       .order('updated_at', { ascending: false })
+    if (error) {
+      // `is_pinned` likely doesn't exist on the live table yet — fall back
+      // so the whole history list doesn't silently disappear because of it.
+      const fallback = await supabase
+        .from('conversations')
+        .select('id, title, mode, subject, updated_at')
+        .order('updated_at', { ascending: false })
+      data = fallback.data
+      error = fallback.error
+    }
     if (!error) {
       const sorted = [...(data || [])].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
       setConversations(sorted)
@@ -987,7 +1320,8 @@ function Dashboard({ session }) {
       }
 
       const attachmentMarkdownParts = []
-      const uploadedImages = []
+      const filesForApi = []
+      const attachmentFailures = []
       for (const file of filesToSend) {
         const ext = file.mimeType === 'application/pdf' ? 'pdf' : (file.mimeType.split('/')[1] || 'dat')
         const path = `${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
@@ -995,41 +1329,49 @@ function Dashboard({ session }) {
         const { error: uploadError } = await supabase.storage
           .from('assignment-images')
           .upload(path, blob, { contentType: file.mimeType })
-        if (!uploadError) {
-          // Signed URL instead of a public one — the bucket is private, so this is
-          // required for the link to work at all. Expiry is set very long (10 years)
-          // because the URL gets baked into the stored message content in Supabase;
-          // once a message is saved, there's no later point to re-sign it.
-          const { data: urlData, error: signError } = await supabase.storage
-            .from('assignment-images')
-            .createSignedUrl(path, 60 * 60 * 24 * 365 * 10)
-          if (!signError && urlData) {
-            const isImageAttachment = file.mimeType.startsWith('image/')
-            attachmentMarkdownParts.push(
-              isImageAttachment
-                ? `![assignment image](${urlData.signedUrl})`
-                : `[📄 ${file.name || 'attached file'}](${urlData.signedUrl})`
-            )
-            // The backend now fetches each file server-side from this URL
-            // rather than receiving it as base64 in the request body —
-            // Vercel caps incoming request bodies at 4.5MB, which a
-            // base64-encoded PDF or a few images could exceed.
-            uploadedImages.push({ url: urlData.signedUrl, mimeType: file.mimeType })
-          }
+        if (uploadError) {
+          console.error('Attachment upload failed:', file.name, uploadError)
+          attachmentFailures.push(`"${file.name || 'file'}" didn't upload: ${uploadError.message}`)
+          continue
         }
+        // Signed URL instead of a public one — the bucket is private, so this is
+        // required for the link to work at all. Expiry is set very long (10 years)
+        // because the URL gets baked into the stored message content in Supabase;
+        // once a message is saved, there's no later point to re-sign it.
+        const { data: urlData, error: signError } = await supabase.storage
+          .from('assignment-images')
+          .createSignedUrl(path, 60 * 60 * 24 * 365 * 10)
+        if (signError || !urlData) {
+          console.error('Signed URL failed:', file.name, signError)
+          attachmentFailures.push(`"${file.name || 'file'}" uploaded but couldn't be linked: ${signError?.message || 'unknown error'}`)
+          continue
+        }
+        const isImageAttachment = file.mimeType.startsWith('image/')
+        attachmentMarkdownParts.push(
+          isImageAttachment
+            ? `![assignment image](${urlData.signedUrl})`
+            : `[📄 ${file.name || 'attached file'}](${urlData.signedUrl})`
+        )
+        // Sent to /api/generate as a URL, not base64 — the backend fetches
+        // it server-side. Keeps the request tiny regardless of file size,
+        // which is what was breaking PDF uploads (Vercel's 4.5MB body cap).
+        filesForApi.push({ url: urlData.signedUrl, mimeType: file.mimeType })
       }
 
+      if (attachmentFailures.length) {
+        setError(attachmentFailures.join(' '))
+      }
+
+      // Joined with a single space (not a blank-line paragraph break) so multiple
+      // attachments render inline together in one row instead of stacking full-width.
       const userContent = attachmentMarkdownParts.length
-        ? `${attachmentMarkdownParts.join('\n\n')}${userText ? '\n\n' + userText : ''}`
+        ? `${attachmentMarkdownParts.join(' ')}${userText ? '\n\n' + userText : ''}`
         : userText
 
       setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userContent })
 
       const history = messages.map((m) => ({ role: m.role, content: m.content }))
-
-      const controller = new AbortController()
-      abortControllerRef.current = controller
 
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -1042,9 +1384,9 @@ function Dashboard({ session }) {
           mode,
           assignmentText: userText,
           history,
-          images: uploadedImages,
+          images: filesForApi,
+          nickname: profile?.nickname || null,
         }),
-        signal: controller.signal,
       })
       const data = await response.json()
 
@@ -1054,19 +1396,12 @@ function Dashboard({ session }) {
         setMessages((prev) => [...prev, { id: `temp-a-${Date.now()}`, role: 'assistant', content: data.result }])
         await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: data.result })
         loadConversations()
+        touchStreak()
       }
     } catch (err) {
-      // A user-initiated stop shows no error — that's expected, not a failure.
-      if (err.name !== 'AbortError') {
-        setError(err.message || 'Network error. Please try again.')
-      }
+      setError(err.message || 'Network error. Please try again.')
     }
-    abortControllerRef.current = null
     setLoading(false)
-  }
-
-  const handleStopGenerating = () => {
-    abortControllerRef.current?.abort()
   }
 
   if (view === 'settings') {
@@ -1077,8 +1412,10 @@ function Dashboard({ session }) {
         setTheme={setTheme}
         accentColor={accentColor}
         setAccentColor={setAccentColor}
-        enterToSend={enterToSend}
-        setEnterToSend={setEnterToSend}
+        profile={profile}
+        onSaveNickname={handleSaveNickname}
+        onAvatarChange={handleAvatarChange}
+        avatarInputRef={avatarInputRef}
         onBack={() => setView('main')}
       />
     )
@@ -1110,6 +1447,15 @@ function Dashboard({ session }) {
         onCopy={handleCopyText}
         onEdit={handleEditMessage}
       />
+
+      {showNicknamePrompt && (
+        <NicknamePrompt
+          theme={theme}
+          accentColor={accentColor}
+          onSave={handleSaveNickname}
+          onSkip={() => setShowNicknamePrompt(false)}
+        />
+      )}
 
       <div style={styles.topBar}>
         <button onClick={() => setSidebarOpen(true)} style={styles.iconBtn}><MenuIcon color={c.text} /></button>
@@ -1170,8 +1516,13 @@ function Dashboard({ session }) {
               {file.preview ? (
                 <img src={file.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
               ) : (
-                <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: c.subtext, textAlign: 'center', padding: '4px', overflow: 'hidden' }}>
-                  📄 {file.name || 'File'}
+                <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '4px', overflow: 'hidden' }}>
+                  <span style={{ fontSize: '0.6rem', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', backgroundColor: c.accent, color: c.accentText }}>
+                    {(file.name?.split('.').pop() || 'FILE').toUpperCase().slice(0, 4)}
+                  </span>
+                  <span style={{ fontSize: '0.6rem', color: c.subtext, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
+                    {file.name || 'File'}
+                  </span>
                 </div>
               )}
               <button
@@ -1244,36 +1595,16 @@ function Dashboard({ session }) {
             el.style.height = Math.min(el.scrollHeight, 150) + 'px'
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && enterToSend) {
+            if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               e.currentTarget.form?.requestSubmit()
             }
           }}
           style={{ ...styles.bottomInput, color: c.text }}
         />
-        {loading ? (
-          <button
-            type="button"
-            onClick={handleStopGenerating}
-            style={{ ...styles.sendBtn, backgroundColor: c.text }}
-            aria-label="Stop generating"
-          >
-            <StopIcon color={c.bg} />
-          </button>
-        ) : (
-          <button
-            type="submit"
-            disabled={!assignmentText.trim() && attachedFiles.length === 0}
-            style={{
-              ...styles.sendBtn,
-              backgroundColor: c.accent,
-              opacity: !assignmentText.trim() && attachedFiles.length === 0 ? 0.4 : 1,
-            }}
-            aria-label="Send"
-          >
-            <SendIcon color={c.accentText} />
-          </button>
-        )}
+        <button type="submit" disabled={loading} style={styles.sendBtn}>
+          <SendIcon color={c.accent} />
+        </button>
       </form>
     </div>
   )
@@ -1397,7 +1728,7 @@ const styles = {
   attachMenuItem: { display: 'flex', alignItems: 'center', gap: '0.7rem', padding: '0.55rem 0.5rem', borderRadius: '10px', cursor: 'pointer', fontSize: '0.9rem' },
   attachMenuIconWrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0 },
   bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem', fontFamily: 'inherit', resize: 'none', overflowY: 'auto', maxHeight: '150px', lineHeight: '1.4', padding: '0.4rem 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
-  sendBtn: { border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '38px', height: '38px', borderRadius: '50%', flexShrink: 0, transition: 'opacity 0.15s ease' },
+  sendBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.3rem' },
   themeBtn: { flex: 1, padding: '0.6rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
   logoutBtn: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 'bold' },
   sidebarOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 40 },
