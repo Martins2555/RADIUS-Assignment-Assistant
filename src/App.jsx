@@ -86,6 +86,14 @@ function SendIcon({ color }) {
   )
 }
 
+function StopIcon({ color }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <rect x="5" y="5" width="14" height="14" rx="2.5" fill={color} />
+    </svg>
+  )
+}
+
 function CopyIcon({ color }) {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -352,7 +360,7 @@ function NicknamePrompt({ theme, accentColor, onSave, onSkip }) {
   )
 }
 
-function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onAvatarChange, avatarInputRef, onBack }) {
+function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onBack }) {
   const c = getPalette(theme, accentColor)
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -376,6 +384,8 @@ function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor,
         onSaveNickname={onSaveNickname}
         onAvatarChange={onAvatarChange}
         avatarInputRef={avatarInputRef}
+        enterToSend={enterToSend}
+        setEnterToSend={setEnterToSend}
         onLogout={handleLogout}
         c={c}
       />
@@ -391,7 +401,7 @@ function SettingsCard({ c, children, style }) {
   )
 }
 
-function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onAvatarChange, avatarInputRef, onLogout, c }) {
+function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onLogout, c }) {
   const [nicknameDraft, setNicknameDraft] = useState(profile?.nickname || '')
   const nicknameChanged = nicknameDraft.trim() && nicknameDraft.trim() !== (profile?.nickname || '')
   const initial = (profile?.nickname || session.user.email || '?')[0].toUpperCase()
@@ -545,6 +555,46 @@ function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, p
           ))}
         </div>
         <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.7rem' }}>More colors and custom backgrounds are coming with premium.</p>
+      </SettingsCard>
+
+      {/* Messaging */}
+      <SettingsCard c={c}>
+        <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '0 0 0.7rem' }}>MESSAGING</p>
+        <div
+          onClick={() => setEnterToSend(!enterToSend)}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+        >
+          <div>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: c.text }}>Enter key sends message</p>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.78rem', color: c.subtext }}>
+              {enterToSend ? 'Enter sends — Shift+Enter for a new line' : 'Enter starts a new line — tap send to submit'}
+            </p>
+          </div>
+          <span
+            style={{
+              width: '42px',
+              height: '24px',
+              borderRadius: '12px',
+              backgroundColor: enterToSend ? c.accent : c.border,
+              position: 'relative',
+              flexShrink: 0,
+              transition: 'background-color 0.15s ease',
+            }}
+          >
+            <span
+              style={{
+                position: 'absolute',
+                top: '2px',
+                left: enterToSend ? '20px' : '2px',
+                width: '20px',
+                height: '20px',
+                borderRadius: '50%',
+                backgroundColor: '#fff',
+                transition: 'left 0.15s ease',
+              }}
+            />
+          </span>
+        </div>
       </SettingsCard>
 
       {/* Membership */}
@@ -1067,6 +1117,7 @@ function Dashboard({ session }) {
   const [longPressMenu, setLongPressMenu] = useState(null)
   const [profile, setProfile] = useState(null)
   const [showNicknamePrompt, setShowNicknamePrompt] = useState(false)
+  const [enterToSend, setEnterToSend] = useState(() => localStorage.getItem('radius-enter-to-send') === 'true')
 
   const c = getPalette(theme, accentColor)
   const displayName = profile?.nickname || session.user.user_metadata?.full_name || session.user.email.split('@')[0]
@@ -1076,6 +1127,7 @@ function Dashboard({ session }) {
   const filesInputRef = useRef(null)
   const cameraInputRef = useRef(null)
   const avatarInputRef = useRef(null)
+  const abortControllerRef = useRef(null)
 
   useEffect(() => {
     loadConversations()
@@ -1085,6 +1137,10 @@ function Dashboard({ session }) {
   useEffect(() => {
     localStorage.setItem('radius-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem('radius-enter-to-send', String(enterToSend))
+  }, [enterToSend])
 
   useEffect(() => {
     localStorage.setItem('radius-accent', accentColor)
@@ -1373,6 +1429,9 @@ function Dashboard({ session }) {
 
       const history = messages.map((m) => ({ role: m.role, content: m.content }))
 
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: {
@@ -1387,6 +1446,7 @@ function Dashboard({ session }) {
           images: filesForApi,
           nickname: profile?.nickname || null,
         }),
+        signal: controller.signal,
       })
       const data = await response.json()
 
@@ -1399,9 +1459,17 @@ function Dashboard({ session }) {
         touchStreak()
       }
     } catch (err) {
-      setError(err.message || 'Network error. Please try again.')
+      // A user-initiated stop shows no error - that's expected, not a failure.
+      if (err.name !== 'AbortError') {
+        setError(err.message || 'Network error. Please try again.')
+      }
     }
+    abortControllerRef.current = null
     setLoading(false)
+  }
+
+  const handleStopGenerating = () => {
+    abortControllerRef.current?.abort()
   }
 
   if (view === 'settings') {
@@ -1416,6 +1484,8 @@ function Dashboard({ session }) {
         onSaveNickname={handleSaveNickname}
         onAvatarChange={handleAvatarChange}
         avatarInputRef={avatarInputRef}
+        enterToSend={enterToSend}
+        setEnterToSend={setEnterToSend}
         onBack={() => setView('main')}
       />
     )
@@ -1595,16 +1665,36 @@ function Dashboard({ session }) {
             el.style.height = Math.min(el.scrollHeight, 150) + 'px'
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey && enterToSend) {
               e.preventDefault()
               e.currentTarget.form?.requestSubmit()
             }
           }}
           style={{ ...styles.bottomInput, color: c.text }}
         />
-        <button type="submit" disabled={loading} style={styles.sendBtn}>
-          <SendIcon color={c.accent} />
-        </button>
+        {loading ? (
+          <button
+            type="button"
+            onClick={handleStopGenerating}
+            style={{ ...styles.sendBtn, backgroundColor: c.text }}
+            aria-label="Stop generating"
+          >
+            <StopIcon color={c.bg} />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!assignmentText.trim() && attachedFiles.length === 0}
+            style={{
+              ...styles.sendBtn,
+              backgroundColor: c.accent,
+              opacity: !assignmentText.trim() && attachedFiles.length === 0 ? 0.4 : 1,
+            }}
+            aria-label="Send"
+          >
+            <SendIcon color={c.accentText} />
+          </button>
+        )}
       </form>
     </div>
   )
