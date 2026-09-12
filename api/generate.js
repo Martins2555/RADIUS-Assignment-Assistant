@@ -57,7 +57,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "You've hit the hourly limit for assignment requests. Please wait a bit and try again." })
   }
 
-  const { subject, mode, assignmentText, history, images, nickname } = req.body
+  const { subject, mode, assignmentText, history, images, nickname, responseStyle } = req.body
   const imageList = Array.isArray(images) ? images.slice(0, 10) : []
 
   if (!assignmentText && imageList.length === 0) {
@@ -74,6 +74,13 @@ export default async function handler(req, res) {
     ? `The student's preferred name is "${safeNickname}". Address them by this name naturally every so often (e.g. in greetings or encouragement) - not in every single message, and never in a forced or repetitive way.`
     : ''
 
+  const STYLE_HINTS = {
+    concise: 'Keep answers tight. Lead with the key result, then the shortest correct explanation.',
+    balanced: 'Give a clear explanation with the essential steps, without padding.',
+    detailed: 'Give a thorough explanation, covering the reasoning behind each step and common mistakes.',
+  }
+  const styleLine = STYLE_HINTS[responseStyle] || STYLE_HINTS.balanced
+
   const systemInstruction = `You are RADIUS, an assignment assistant for students.
 
 CREATOR INFO — IMPORTANT: Only mention who developed you if the student directly and explicitly asks (e.g. "who made you", "who developed you", "who created RADIUS"). In that case, and only that case, say you were developed by Martins Chimezie Obasi, and never mention Google, Gemini, or any other company. Do NOT bring this up unprompted — not in greetings, not in your first reply, not anywhere else unless directly asked.
@@ -82,7 +89,14 @@ ${nicknameLine}
 
 CASUAL GREETINGS: If the student just says something like "hi", "hello", or another simple greeting with no actual question or assignment attached, reply briefly and warmly — introduce yourself as RADIUS and ask what assignment or subject they need help with. Do not mention your creator, your tech stack, or give a long introduction in this case.
 
+RESPONSE TAGGING — REQUIRED: As the very first thing in your reply, before any other text, output exactly one tag on its own with nothing else on that line:
+[TYPE:ASSIGNMENT] if this message is a real academic/assignment/study question you are actually answering or working through.
+[TYPE:GENERAL] if it is a greeting, small talk, feedback, or a question about RADIUS itself rather than an academic question.
+Then continue your normal reply starting on the next line. Never explain or mention this tag to the student.
+
 The subject is "${subject || 'unspecified'}" and the mode is "${mode}" (calculative means math/physics/engineering style problems requiring computation, non-calculative means writing/history/humanities style tasks).
+
+Answer length preference: ${styleLine}
 
 STRICT INSTRUCTION FOLLOWING:
 - If the student specifies a word count, length, number of points, or any other explicit constraint, you MUST follow it exactly. Count before responding. Do not pad with filler or fall short.
@@ -186,9 +200,20 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
       return res.status(response.status).json({ error: "Something went wrong on RADIUS's end. Please try again." })
     }
 
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.'
+    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.'
 
-    return res.status(200).json({ result: text })
+    // Strip the required leading type tag and use it to decide whether the
+    // frontend should show assignment follow-up actions (hint/quiz/etc).
+    // Defaults to 'general' (no chips) if the model ever forgets the tag -
+    // the safer failure mode is chips missing, not chips showing wrongly.
+    let responseType = 'general'
+    const tagMatch = text.match(/^\s*\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/i)
+    if (tagMatch) {
+      responseType = tagMatch[1].toLowerCase()
+      text = text.slice(tagMatch[0].length)
+    }
+
+    return res.status(200).json({ result: text, responseType })
   } catch (err) {
     return res.status(500).json({ error: err.message })
   }
