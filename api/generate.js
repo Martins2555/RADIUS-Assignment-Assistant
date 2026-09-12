@@ -149,36 +149,50 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
   currentParts.push(...fetchedParts.filter(Boolean))
   contents.push({ role: 'user', parts: currentParts })
 
-  // gemini-3.6-flash is a preview-tier model with tighter rate limits per
-  // Google's own docs - 3.7 Flash is the generally-available successor in the
-  // same family and should relieve the 429 pressure seen earlier.
-  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${apiKey}`
+  // Two model IDs in a fallback chain, not one - gemini-3.7-flash has been
+  // seeing sustained 503 "overloaded" errors on Google's end recently
+  // (confirmed on Google's own developer forums, not specific to this app).
+  // Retrying the *same* overloaded model rarely helps during a sustained
+  // outage; falling back to a different model does.
+  const MODEL_CHAIN = ['gemini-3.7-flash', 'gemini-3.6-flash']
+  const geminiUrlFor = (model) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
   const requestBody = JSON.stringify({
     system_instruction: { parts: [{ text: systemInstruction }] },
     contents,
   })
 
-  async function callGeminiWithRetry(maxRetries = 2) {
+  async function callGeminiOnce(model) {
+    const response = await fetch(geminiUrlFor(model), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: requestBody,
+    })
+    const data = await response.json()
+    return { response, data }
+  }
+
+  async function callGeminiWithRetry(maxRetries = 1) {
     let lastResponse, lastData
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const response = await fetch(GEMINI_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: requestBody,
-      })
-      const data = await response.json()
+    for (const model of MODEL_CHAIN) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const { response, data } = await callGeminiOnce(model)
 
-      // 503 = model temporarily overloaded on Google's end - just as worth
-      // retrying with backoff as 429 (rate limited). Both are transient.
-      const isRetryable = response.status === 429 || response.status === 503
-      if (!isRetryable || attempt === maxRetries) {
-        return { response, data }
+        // 503 = model temporarily overloaded on Google's end - worth a quick
+        // retry, then worth trying the next model in the chain rather than
+        // hammering the same overloaded one repeatedly.
+        const isRetryable = response.status === 429 || response.status === 503
+        if (!isRetryable) {
+          return { response, data }
+        }
+
+        lastResponse = response
+        lastData = data
+        if (attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+        }
       }
-
-      lastResponse = response
-      lastData = data
-      // Brief backoff before retrying: 1s, then 2s
-      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+      // Exhausted retries on this model - fall through to the next one in
+      // MODEL_CHAIN before giving up entirely.
     }
     return { response: lastResponse, data: lastData }
   }
