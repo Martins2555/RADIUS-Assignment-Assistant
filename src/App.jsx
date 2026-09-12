@@ -500,7 +500,7 @@ function NicknamePrompt({ theme, accentColor, onSave, onSkip }) {
   )
 }
 
-function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onSavePreference, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onDeleteAccount, onBack }) {
+function SettingsScreen({ session, theme, themePreference, setThemePreference, accentColor, setAccentColor, profile, onSaveNickname, onSavePreference, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onDeleteAccount, onBack }) {
   const c = getPalette(theme, accentColor)
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -666,19 +666,20 @@ function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, p
           {[
             { key: 'dark', label: '🌙 Dark' },
             { key: 'light', label: '☀️ Light' },
+            { key: 'system', label: '📱 System' },
           ].map((opt) => (
             <button
               key={opt.key}
-              onClick={() => setTheme(opt.key)}
+              onClick={() => setThemePreference(opt.key)}
               style={{
                 flex: 1,
                 padding: '0.6rem 0',
                 borderRadius: '9px',
                 border: 'none',
-                backgroundColor: theme === opt.key ? c.accent : 'transparent',
-                color: theme === opt.key ? c.accentText : c.subtext,
-                fontWeight: theme === opt.key ? 'bold' : 'normal',
-                fontSize: '0.88rem',
+                backgroundColor: themePreference === opt.key ? c.accent : 'transparent',
+                color: themePreference === opt.key ? c.accentText : c.subtext,
+                fontWeight: themePreference === opt.key ? 'bold' : 'normal',
+                fontSize: '0.82rem',
                 cursor: 'pointer',
                 transition: 'background-color 0.15s',
               }}
@@ -902,12 +903,19 @@ const noSelectStyle = { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouc
 function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback }) {
   const c = getPalette(theme, accentColor)
   const isUser = role === 'user'
+  // Only user messages get the custom long-press menu (copy/edit) — they have
+  // no action buttons below them. AI replies already have copy/feedback
+  // buttons right underneath, so long-pressing one falls through to normal
+  // native text selection (highlight a word/phrase, drag handles, the OS's
+  // own copy popup) instead of our menu intercepting the gesture and only
+  // offering a whole-bubble copy.
   const longPress = useLongPress((x, y) => onLongPress(x, y, { id, role, content }))
+  const pressHandlers = isUser ? longPress : {}
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.35rem' }}>
       <div
-        {...longPress}
+        {...pressHandlers}
         style={{
           maxWidth: '85%',
           padding: '0.7rem 1rem',
@@ -915,7 +923,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
           backgroundColor: isUser ? c.accent : c.surface,
           color: isUser ? c.accentText : c.text,
           border: isUser ? 'none' : `1px solid ${c.border}`,
-          ...noSelectStyle,
+          ...(isUser ? noSelectStyle : {}),
         }}
       >
         <div style={{ lineHeight: '1.6' }} className="radius-markdown">
@@ -1312,7 +1320,24 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
 
 function Dashboard({ session }) {
   const [view, setView] = useState('main')
-  const [theme, setTheme] = useState(() => localStorage.getItem('radius-theme') || 'dark')
+  const [themePreference, setThemePreference] = useState(() => localStorage.getItem('radius-theme') || 'dark')
+  // Tracks the OS-level color scheme live, so switching device theme while
+  // the app is open (or already having it set) updates RADIUS immediately
+  // when the "System" preference is selected below.
+  const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : true
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const handleChange = (e) => setSystemPrefersDark(e.matches)
+    mql.addEventListener('change', handleChange)
+    return () => mql.removeEventListener('change', handleChange)
+  }, [])
+  // This is the value every other component in the tree actually receives as
+  // `theme` — always a concrete 'dark' or 'light', never 'system'. Only this
+  // component needs to know about the third "match device" option.
+  const theme = themePreference === 'system' ? (systemPrefersDark ? 'dark' : 'light') : themePreference
   const [accentColor, setAccentColor] = useState(() => localStorage.getItem('radius-accent') || 'green')
   const [mode, setMode] = useState('calculative')
   const [subject, setSubject] = useState('')
@@ -1347,8 +1372,8 @@ function Dashboard({ session }) {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('radius-theme', theme)
-  }, [theme])
+    localStorage.setItem('radius-theme', themePreference)
+  }, [themePreference])
 
   useEffect(() => {
     localStorage.setItem('radius-enter-to-send', String(enterToSend))
@@ -1728,7 +1753,8 @@ function Dashboard({ session }) {
       <SettingsScreen
         session={session}
         theme={theme}
-        setTheme={setTheme}
+        themePreference={themePreference}
+        setThemePreference={setThemePreference}
         accentColor={accentColor}
         setAccentColor={setAccentColor}
         profile={profile}
