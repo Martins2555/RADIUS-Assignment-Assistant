@@ -5,6 +5,23 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 
+function EyeIcon({ color }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z" stroke={color} strokeWidth="1.7" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke={color} strokeWidth="1.7" />
+    </svg>
+  )
+}
+
+function EyeOffIcon({ color }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2M6.2 6.5C3.9 8 1.5 12 1.5 12s3.5 7 10.5 7c1.9 0 3.5-.5 4.9-1.2M17 16.2C20 14.5 22.5 12 22.5 12s-1-2-3-3.8" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function GoogleIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 48 48" style={{ marginRight: '10px' }}>
@@ -170,6 +187,36 @@ const accentColors = {
 }
 const accentOrder = ['green', 'blue', 'purple', 'pink', 'orange']
 
+// Quick follow-up actions shown after an assignment-type reply.
+const STUDY_ACTIONS = [
+  { label: 'Explain this', prompt: 'Explain this topic clearly, from the basics up, with one worked example.' },
+  { label: 'Give me a hint', prompt: "Don't give the answer. Give me one hint for the next step only." },
+  { label: 'Quiz me', prompt: 'Quiz me with 5 questions on this topic, one at a time. Wait for my answer before revealing the next.' },
+  { label: 'Summarize', prompt: 'Summarize this topic into short revision notes I can memorise.' },
+  { label: 'Show solution', prompt: 'Now show the complete worked solution with every step and the final answer.' },
+]
+
+const RESPONSE_STYLES = [
+  { value: 'concise', label: 'Concise — straight to the point' },
+  { value: 'balanced', label: 'Balanced — clear steps' },
+  { value: 'detailed', label: 'Detailed — full reasoning' },
+]
+
+const SUBJECTS = [
+  { value: 'auto', label: 'Auto detect' },
+  { value: 'Mathematics', label: 'Mathematics' },
+  { value: 'Physics', label: 'Physics' },
+  { value: 'Chemistry', label: 'Chemistry' },
+  { value: 'Engineering', label: 'Engineering' },
+  { value: 'Computer Science', label: 'Computer Science' },
+  { value: 'Programming', label: 'Programming' },
+  { value: 'Biology', label: 'Biology' },
+  { value: 'Economics', label: 'Economics' },
+  { value: 'Business', label: 'Business' },
+  { value: 'English', label: 'English' },
+  { value: 'General', label: 'General' },
+]
+
 const modeBase = {
   dark: { bg: '#0f0f0f', surface: '#1a1a1a', border: '#333', text: '#ffffff', subtext: '#888' },
   light: { bg: '#ffffff', surface: '#f0f0f0', border: '#ddd', text: '#111111', subtext: '#666' },
@@ -193,10 +240,11 @@ function Logo({ small }) {
   )
 }
 
-function AuthScreen() {
-  const [isSignUp, setIsSignUp] = useState(true)
+function AuthScreen({ initialSignUp = true }) {
+  const [isSignUp, setIsSignUp] = useState(initialSignUp)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
@@ -279,7 +327,24 @@ function AuthScreen() {
       <p className="fade-in-2" style={styles.subtitle}>All-Round Assignment and Task Assistant</p>
       <form onSubmit={handleAuth} className="fade-in-3" style={styles.form}>
         <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={styles.input} />
-        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required style={styles.input} />
+        <div style={{ position: 'relative' }}>
+          <input
+            type={showPassword ? 'text' : 'password'}
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            style={{ ...styles.input, width: '100%', boxSizing: 'border-box', paddingRight: '2.6rem' }}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
+            style={{ position: 'absolute', right: '0.7rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex' }}
+          >
+            {showPassword ? <EyeOffIcon color="#888" /> : <EyeIcon color="#888" />}
+          </button>
+        </div>
         <button type="submit" disabled={loading} style={styles.button}>
           {loading ? 'Please wait...' : isSignUp ? 'Sign Up' : 'Log In'}
         </button>
@@ -297,6 +362,81 @@ function AuthScreen() {
         {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
       </p>
       {message && <p style={styles.message}>{message}</p>}
+    </div>
+  )
+}
+
+function LandingScreen({ onGetStarted, onSignIn }) {
+  const points = [
+    { title: 'Step-by-step solutions', body: 'Every calculation shown, with the final answer stated clearly at the end.' },
+    { title: 'Photo a question', body: 'Upload a picture of a printed or handwritten question and get it worked through.' },
+    { title: 'Private history', body: 'Your conversations and uploads are saved and private to your account.' },
+  ]
+  return (
+    <div style={{ ...styles.container, justifyContent: 'flex-start', paddingTop: '3rem' }}>
+      <Logo />
+      <p style={{ color: '#5eead4', fontSize: '0.8rem', fontWeight: 'bold', letterSpacing: '0.08em', textTransform: 'uppercase', margin: '1.2rem 0 0.6rem' }}>
+        Academic Assistant
+      </p>
+      <h1 className="fade-in-2" style={{ fontSize: '1.7rem', fontWeight: 'bold', lineHeight: '1.25', margin: '0 0 0.8rem' }}>
+        Understand your assignment, don't just finish it.
+      </h1>
+      <p className="fade-in-3" style={{ color: '#aaa', lineHeight: '1.6', maxWidth: '340px', margin: '0 0 1.6rem' }}>
+        RADIUS explains your assignment questions step by step, checks work you've already done, and turns hard topics into something you can revise from.
+      </p>
+      <div className="fade-in-3" style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem', width: '100%', maxWidth: '320px' }}>
+        <button onClick={onGetStarted} style={styles.button}>Get Started</button>
+        <p style={{ ...styles.toggle, marginTop: 0 }} onClick={onSignIn}>Already have an account? Log in</p>
+      </div>
+
+      <div style={{ marginTop: '2.5rem', width: '100%', maxWidth: '360px', textAlign: 'left' }}>
+        {points.map((p) => (
+          <div key={p.title} style={{ border: '1px solid #333', borderRadius: '12px', padding: '1rem', marginBottom: '0.8rem' }}>
+            <p style={{ fontWeight: 'bold', margin: '0 0 0.3rem' }}>{p.title}</p>
+            <p style={{ color: '#aaa', fontSize: '0.85rem', margin: 0, lineHeight: '1.5' }}>{p.body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AboutScreen({ theme, accentColor, onBack }) {
+  const c = getPalette(theme, accentColor)
+  const points = [
+    { title: 'Understand, then answer', body: 'Every reply separates the explanation from the final answer, so you can follow the method before you read the result.' },
+    { title: 'Quick follow-ups after every answer', body: 'Ask for a hint, a quiz, a summary, or the full solution with one tap - no need to retype your question.' },
+    { title: 'Photograph your question', body: 'Upload a picture of a printed or handwritten question and RADIUS will read it and work through it with you.' },
+    { title: 'Your work stays yours', body: 'Signed-in students get private history and uploads that only they can see.' },
+  ]
+  return (
+    <div style={{ ...styles.settingsContainer, backgroundColor: c.bg, color: c.text }}>
+      <div style={styles.topBar}>
+        <button onClick={onBack} style={styles.iconBtn}><BackIcon color={c.text} /></button>
+        <span style={{ fontWeight: 'bold' }}>About</span>
+        <div style={{ width: '22px' }} />
+      </div>
+      <div style={{ padding: '0.5rem 0.2rem 2rem' }}>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '0.5rem 0 0.8rem' }}>About RADIUS</h1>
+        <p style={{ color: c.subtext, lineHeight: '1.6', margin: '0 0 1.5rem' }}>
+          RADIUS is an academic assistant for university and college students. It covers mathematics, physics, chemistry,
+          engineering, computer science, programming, biology, economics, business and English, and it is built around
+          one idea: an answer is only useful if you understand how it was reached.
+        </p>
+        {points.map((p) => (
+          <SettingsCard key={p.title} c={c}>
+            <p style={{ fontWeight: 'bold', margin: '0 0 0.4rem' }}>{p.title}</p>
+            <p style={{ color: c.subtext, fontSize: '0.88rem', margin: 0, lineHeight: '1.55' }}>{p.body}</p>
+          </SettingsCard>
+        ))}
+        <SettingsCard c={c} style={{ backgroundColor: `${c.accent}14` }}>
+          <p style={{ fontWeight: 'bold', margin: '0 0 0.4rem' }}>Using RADIUS honestly</p>
+          <p style={{ color: c.subtext, fontSize: '0.88rem', margin: 0, lineHeight: '1.55' }}>
+            RADIUS is a study tool. Check your institution's rules on assisted work, and always submit work you
+            understand and can defend. RADIUS will tell you when it is unsure rather than invent facts, data or sources.
+          </p>
+        </SettingsCard>
+      </div>
     </div>
   )
 }
@@ -360,7 +500,7 @@ function NicknamePrompt({ theme, accentColor, onSave, onSkip }) {
   )
 }
 
-function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onBack }) {
+function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onSavePreference, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onDeleteAccount, onBack }) {
   const c = getPalette(theme, accentColor)
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -382,10 +522,12 @@ function SettingsScreen({ session, theme, setTheme, accentColor, setAccentColor,
         setAccentColor={setAccentColor}
         profile={profile}
         onSaveNickname={onSaveNickname}
+        onSavePreference={onSavePreference}
         onAvatarChange={onAvatarChange}
         avatarInputRef={avatarInputRef}
         enterToSend={enterToSend}
         setEnterToSend={setEnterToSend}
+        onDeleteAccount={onDeleteAccount}
         onLogout={handleLogout}
         c={c}
       />
@@ -401,8 +543,24 @@ function SettingsCard({ c, children, style }) {
   )
 }
 
-function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onLogout, c }) {
+function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onSavePreference, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onDeleteAccount, onLogout, c }) {
   const [nicknameDraft, setNicknameDraft] = useState(profile?.nickname || '')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  const handleDeleteClick = async () => {
+    if (!window.confirm('Permanently delete your account and everything in it? This cannot be undone.')) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await onDeleteAccount()
+    } catch (e) {
+      setDeleteError(e.message || 'Your account could not be deleted. Please try again.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const nicknameChanged = nicknameDraft.trim() && nicknameDraft.trim() !== (profile?.nickname || '')
   const initial = (profile?.nickname || session.user.email || '?')[0].toUpperCase()
 
@@ -530,6 +688,28 @@ function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, p
           ))}
         </div>
 
+        <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '1.3rem 0 0.5rem' }}>ANSWER LENGTH</p>
+        <select
+          value={profile?.response_style || 'balanced'}
+          onChange={(e) => onSavePreference('response_style', e.target.value)}
+          style={{ width: '100%', padding: '0.7rem 0.8rem', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.bg, color: c.text, fontSize: '0.88rem' }}
+        >
+          {RESPONSE_STYLES.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+
+        <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '1.3rem 0 0.5rem' }}>DEFAULT SUBJECT</p>
+        <select
+          value={profile?.preferred_subject || 'auto'}
+          onChange={(e) => onSavePreference('preferred_subject', e.target.value)}
+          style={{ width: '100%', padding: '0.7rem 0.8rem', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.bg, color: c.text, fontSize: '0.88rem' }}
+        >
+          {SUBJECTS.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+
         <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '1.3rem 0 0.7rem' }}>CHAT COLOR</p>
         <div style={{ display: 'flex', gap: '0.7rem' }}>
           {accentOrder.map((key) => (
@@ -645,6 +825,21 @@ function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, p
           </div>
           <span>@RadiusAI on X</span>
         </a>
+      </SettingsCard>
+
+      <SettingsCard c={c} style={{ borderColor: '#ef444455' }}>
+        <p style={{ color: '#ef4444', fontWeight: 'bold', fontSize: '0.9rem', margin: '0 0 0.4rem' }}>Delete account</p>
+        <p style={{ color: c.subtext, fontSize: '0.82rem', margin: '0 0 0.8rem', lineHeight: '1.5' }}>
+          This permanently removes your conversations, uploads, and sign-in. This cannot be undone.
+        </p>
+        {deleteError && <p style={{ color: '#ef4444', fontSize: '0.82rem', margin: '0 0 0.6rem' }}>{deleteError}</p>}
+        <button
+          onClick={handleDeleteClick}
+          disabled={deleting}
+          style={{ padding: '0.6rem 1rem', borderRadius: '8px', border: '1.5px solid #ef4444', backgroundColor: 'transparent', color: '#ef4444', fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer', opacity: deleting ? 0.6 : 1 }}
+        >
+          {deleting ? 'Deleting...' : 'Delete my account'}
+        </button>
       </SettingsCard>
 
       <button onClick={onLogout} style={{ ...styles.logoutBtn, borderColor: c.border, color: '#ef4444', width: '100%', boxSizing: 'border-box' }}>
@@ -958,7 +1153,7 @@ function ConversationRow({ conv, isActive, c, onSelect, onLongPress, isRenaming,
   )
 }
 
-function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, onRenameConversation, onDeleteConversation, onTogglePin, theme, accentColor, session }) {
+function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, onGoHome, onOpenAbout, onRenameConversation, onDeleteConversation, onTogglePin, theme, accentColor, session }) {
   const c = getPalette(theme, accentColor)
   const [rowMenu, setRowMenu] = useState(null)
   const [renamingId, setRenamingId] = useState(null)
@@ -1018,6 +1213,22 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
             <span style={{ fontWeight: 'bold', color: c.text }}>RADIUS</span>
           </div>
           <button onClick={onClose} style={styles.iconBtn}><BackIcon color={c.text} /></button>
+        </div>
+
+        <div style={{ padding: '0 0.6rem 0.6rem', borderBottom: `1px solid ${c.border}`, marginBottom: '0.6rem' }}>
+          {[
+            { key: 'home', label: 'Home', onClick: onGoHome },
+            { key: 'assistant', label: 'Assistant', onClick: onNewChat },
+            { key: 'about', label: 'About', onClick: onOpenAbout },
+          ].map((item) => (
+            <div
+              key={item.key}
+              onClick={item.onClick}
+              style={{ padding: '0.55rem 0.6rem', borderRadius: '8px', color: c.text, fontSize: '0.9rem', cursor: 'pointer' }}
+            >
+              {item.label}
+            </div>
+          ))}
         </div>
 
         <button onClick={onNewChat} style={{ ...styles.newChatSidebarBtn, borderColor: c.border, color: c.text }}>
@@ -1128,6 +1339,7 @@ function Dashboard({ session }) {
   const cameraInputRef = useRef(null)
   const avatarInputRef = useRef(null)
   const abortControllerRef = useRef(null)
+  const formRef = useRef(null)
 
   useEffect(() => {
     loadConversations()
@@ -1159,6 +1371,16 @@ function Dashboard({ session }) {
     requestAnimationFrame(() => textAreaRef.current?.focus())
   }
 
+  function handleQuickAction(promptText) {
+    setAssignmentText(promptText)
+    requestAnimationFrame(() => formRef.current?.requestSubmit())
+  }
+
+  function handleRegenerateLast() {
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+    if (lastUser) handleQuickAction(lastUser.content)
+  }
+
   async function handleSetFeedback(messageId, value) {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, feedback: value } : m)))
     // Best-effort only: skips messages that haven't round-tripped to the DB yet
@@ -1186,18 +1408,33 @@ function Dashboard({ session }) {
     await supabase.from('conversations').delete().eq('id', id)
   }
 
+  async function handleDeleteAccount() {
+    const response = await fetch('/api/delete-account', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(data.error || 'Your account could not be deleted. Please try again.')
+    }
+    await supabase.auth.signOut()
+  }
+
   async function loadProfile() {
     // Best-effort: if the `profiles` table/migration hasn't been run yet,
     // this just no-ops and the app carries on using email as the display name.
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('nickname, avatar_url, streak_count, last_active_date')
+        .select('nickname, avatar_url, streak_count, last_active_date, response_style, preferred_subject')
         .eq('user_id', session.user.id)
         .maybeSingle()
       if (!error) {
-        setProfile(data || { nickname: null, avatar_url: null, streak_count: 0 })
+        setProfile(data || { nickname: null, avatar_url: null, streak_count: 0, response_style: 'balanced', preferred_subject: 'auto' })
         if (!data?.nickname) setShowNicknamePrompt(true)
+        if (data?.preferred_subject && data.preferred_subject !== 'auto') {
+          setSubject((prev) => prev || data.preferred_subject)
+        }
       }
     } catch (e) {
       // ignore — see comment above
@@ -1209,6 +1446,15 @@ function Dashboard({ session }) {
     setProfile((prev) => ({ ...(prev || {}), nickname }))
     try {
       await supabase.from('profiles').upsert({ user_id: session.user.id, nickname })
+    } catch (e) {
+      // best-effort — see loadProfile comment
+    }
+  }
+
+  async function handleSavePreference(field, value) {
+    setProfile((prev) => ({ ...(prev || {}), [field]: value }))
+    try {
+      await supabase.from('profiles').upsert({ user_id: session.user.id, [field]: value })
     } catch (e) {
       // best-effort — see loadProfile comment
     }
@@ -1445,6 +1691,7 @@ function Dashboard({ session }) {
           history,
           images: filesForApi,
           nickname: profile?.nickname || null,
+          responseStyle: profile?.response_style || 'balanced',
         }),
         signal: controller.signal,
       })
@@ -1453,7 +1700,7 @@ function Dashboard({ session }) {
       if (!response.ok) {
         setError(data.error || 'Something went wrong.')
       } else {
-        setMessages((prev) => [...prev, { id: `temp-a-${Date.now()}`, role: 'assistant', content: data.result }])
+        setMessages((prev) => [...prev, { id: `temp-a-${Date.now()}`, role: 'assistant', content: data.result, responseType: data.responseType }])
         await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: data.result })
         loadConversations()
         touchStreak()
@@ -1472,6 +1719,10 @@ function Dashboard({ session }) {
     abortControllerRef.current?.abort()
   }
 
+  if (view === 'about') {
+    return <AboutScreen theme={theme} accentColor={accentColor} onBack={() => setView('main')} />
+  }
+
   if (view === 'settings') {
     return (
       <SettingsScreen
@@ -1482,10 +1733,12 @@ function Dashboard({ session }) {
         setAccentColor={setAccentColor}
         profile={profile}
         onSaveNickname={handleSaveNickname}
+        onSavePreference={handleSavePreference}
         onAvatarChange={handleAvatarChange}
         avatarInputRef={avatarInputRef}
         enterToSend={enterToSend}
         setEnterToSend={setEnterToSend}
+        onDeleteAccount={handleDeleteAccount}
         onBack={() => setView('main')}
       />
     )
@@ -1501,6 +1754,8 @@ function Dashboard({ session }) {
         onSelectConversation={openConversation}
         onNewChat={handleNewChat}
         onOpenSettings={() => { setSidebarOpen(false); setView('settings') }}
+        onGoHome={() => { setSidebarOpen(false); setView('main') }}
+        onOpenAbout={() => { setSidebarOpen(false); setView('about') }}
         onRenameConversation={handleRenameConversation}
         onDeleteConversation={handleDeleteConversation}
         onTogglePin={handleTogglePin}
@@ -1544,7 +1799,7 @@ function Dashboard({ session }) {
           </div>
         )}
 
-        {messages.map((m) => (
+        {messages.map((m, i) => (
           <div key={m.id} className="radius-entrance">
             <MessageBubble
               id={m.id}
@@ -1557,6 +1812,23 @@ function Dashboard({ session }) {
               onCopy={handleCopyText}
               onFeedback={handleSetFeedback}
             />
+            {!loading && i === messages.length - 1 && m.role === 'assistant' && m.responseType === 'assignment' && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', margin: '0.5rem 0 0.8rem' }}>
+                <button type="button" onClick={handleRegenerateLast} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>
+                  Regenerate
+                </button>
+                {STUDY_ACTIONS.map((a) => (
+                  <button
+                    key={a.label}
+                    type="button"
+                    onClick={() => handleQuickAction(a.prompt)}
+                    style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
 
@@ -1607,7 +1879,7 @@ function Dashboard({ session }) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} style={{ ...styles.bottomBar, backgroundColor: c.surface, borderColor: c.border }}>
+      <form ref={formRef} onSubmit={handleSubmit} style={{ ...styles.bottomBar, backgroundColor: c.surface, borderColor: c.border }}>
         <input ref={photosInputRef} type="file" accept="image/*" multiple onChange={handleFileChange} style={{ display: 'none' }} />
         <input ref={filesInputRef} type="file" accept="application/pdf,image/*" multiple onChange={handleFileChange} style={{ display: 'none' }} />
         <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
@@ -1761,6 +2033,8 @@ function App() {
   const [session, setSession] = useState(null)
   const [checkingSession, setCheckingSession] = useState(true)
   const [passwordRecovery, setPasswordRecovery] = useState(false)
+  const [showLanding, setShowLanding] = useState(true)
+  const [authSignUp, setAuthSignUp] = useState(true)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1788,7 +2062,16 @@ function App() {
     return <Dashboard session={session} />
   }
 
-  return <AuthScreen />
+  if (showLanding) {
+    return (
+      <LandingScreen
+        onGetStarted={() => { setAuthSignUp(true); setShowLanding(false) }}
+        onSignIn={() => { setAuthSignUp(false); setShowLanding(false) }}
+      />
+    )
+  }
+
+  return <AuthScreen initialSignUp={authSignUp} />
 }
 
 const styles = {
@@ -1825,6 +2108,7 @@ const styles = {
   sidebarPanel: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '80%', maxWidth: '300px', borderRight: '1px solid', zIndex: 50, display: 'flex', flexDirection: 'column' },
   newChatSidebarBtn: { display: 'flex', alignItems: 'center', gap: '0.6rem', margin: '0 1rem', padding: '0.6rem 0.8rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
   msgFeedbackBtn: { background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' },
+  chipBtn: { padding: '0.45rem 0.85rem', borderRadius: '20px', border: '1px solid', backgroundColor: 'transparent', fontSize: '0.82rem', cursor: 'pointer' },
 }
 
 export default App
