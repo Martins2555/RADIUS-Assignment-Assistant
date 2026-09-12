@@ -517,7 +517,8 @@ function SettingsScreen({ session, theme, themePreference, setThemePreference, a
       <SettingsBody
         session={session}
         theme={theme}
-        setTheme={setTheme}
+        themePreference={themePreference}
+        setThemePreference={setThemePreference}
         accentColor={accentColor}
         setAccentColor={setAccentColor}
         profile={profile}
@@ -543,7 +544,7 @@ function SettingsCard({ c, children, style }) {
   )
 }
 
-function SettingsBody({ session, theme, setTheme, accentColor, setAccentColor, profile, onSaveNickname, onSavePreference, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onDeleteAccount, onLogout, c }) {
+function SettingsBody({ session, theme, themePreference, setThemePreference, accentColor, setAccentColor, profile, onSaveNickname, onSavePreference, onAvatarChange, avatarInputRef, enterToSend, setEnterToSend, onDeleteAccount, onLogout, c }) {
   const [nicknameDraft, setNicknameDraft] = useState(profile?.nickname || '')
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
