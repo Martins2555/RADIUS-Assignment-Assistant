@@ -251,10 +251,6 @@ function AuthScreen({ initialSignUp = true }) {
   const [resetEmail, setResetEmail] = useState('')
   const [resetMessage, setResetMessage] = useState('')
   const [resetLoading, setResetLoading] = useState(false)
-  const [awaitingCode, setAwaitingCode] = useState(false)
-  const [otpCode, setOtpCode] = useState('')
-  const [otpMessage, setOtpMessage] = useState('')
-  const [otpLoading, setOtpLoading] = useState(false)
 
   const handleAuth = async (e) => {
     e.preventDefault()
@@ -267,10 +263,7 @@ function AuthScreen({ initialSignUp = true }) {
       } else if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
         setMessage('This email has already been registered to RADIUS. Please log in, or use "Forgot password?" if you don\'t remember your password.')
       } else {
-        // Requires the "Confirm signup" email template in Supabase to use
-        // {{ .Token }} instead of {{ .ConfirmationURL }} - otherwise the
-        // email still contains a link and this code will never arrive.
-        setAwaitingCode(true)
+        setMessage('Check your email to confirm your account.')
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -289,24 +282,6 @@ function AuthScreen({ initialSignUp = true }) {
     })
   }
 
-  const handleVerifyCode = async (e) => {
-    e.preventDefault()
-    setOtpLoading(true)
-    setOtpMessage('')
-    const { error } = await supabase.auth.verifyOtp({ email, token: otpCode.trim(), type: 'signup' })
-    if (error) setOtpMessage(error.message)
-    // On success there's nothing else to do here - the auth state change
-    // this triggers is picked up by App(), which will swap straight to the
-    // Dashboard once the new session lands.
-    setOtpLoading(false)
-  }
-
-  const handleResendCode = async () => {
-    setOtpMessage('')
-    const { error } = await supabase.auth.resend({ type: 'signup', email })
-    setOtpMessage(error ? error.message : 'New code sent.')
-  }
-
   const handleForgotPassword = async (e) => {
     e.preventDefault()
     setResetLoading(true)
@@ -317,36 +292,6 @@ function AuthScreen({ initialSignUp = true }) {
     if (error) setResetMessage(error.message)
     else setResetMessage('Check your email for a password reset link.')
     setResetLoading(false)
-  }
-
-  if (awaitingCode) {
-    return (
-      <div style={styles.container}>
-        <Logo />
-        <p className="fade-in-2" style={styles.subtitle}>Check your email</p>
-        <p className="fade-in-3" style={{ color: '#aaa', textAlign: 'center', margin: '0 0 1.2rem', maxWidth: '300px', lineHeight: '1.5' }}>
-          We sent a 6-digit code to <b>{email}</b>. Enter it below to verify your account.
-        </p>
-        <form onSubmit={handleVerifyCode} className="fade-in-3" style={styles.form}>
-          <input
-            type="text"
-            inputMode="numeric"
-            placeholder="6-digit code"
-            value={otpCode}
-            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            required
-            autoFocus
-            style={{ ...styles.input, textAlign: 'center', fontSize: '1.3rem', letterSpacing: '0.4em' }}
-          />
-          <button type="submit" disabled={otpLoading || otpCode.length !== 6} style={styles.button}>
-            {otpLoading ? 'Verifying...' : 'Verify'}
-          </button>
-        </form>
-        {otpMessage && <p style={{ color: '#f87171', marginTop: '0.8rem', textAlign: 'center' }}>{otpMessage}</p>}
-        <p style={styles.toggle} onClick={handleResendCode}>Resend code</p>
-        <p style={styles.toggle} onClick={() => setAwaitingCode(false)}>Use a different email</p>
-      </div>
-    )
   }
 
   if (showForgotPassword) {
