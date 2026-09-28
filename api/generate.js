@@ -159,6 +159,13 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
   const requestBody = JSON.stringify({
     system_instruction: { parts: [{ text: systemInstruction }] },
     contents,
+    // Gemini 3 defaults to HIGH thinking when this is unset, which adds
+    // several seconds per reply. Calculative keeps a little reasoning for
+    // accuracy; everything else uses minimal for speed.
+    generationConfig: {
+      thinkingConfig: { thinkingLevel: mode === 'calculative' ? 'low' : 'minimal' },
+      maxOutputTokens: 4096,
+    },
   })
 
   async function callGeminiOnce(model) {
@@ -188,7 +195,7 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
         lastResponse = response
         lastData = data
         if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+          await new Promise((resolve) => setTimeout(resolve, 500))
         }
       }
       // Exhausted retries on this model - fall through to the next one in
