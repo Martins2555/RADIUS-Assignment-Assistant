@@ -161,9 +161,10 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
     contents,
     // Gemini 3 defaults to HIGH thinking when this is unset, which adds
     // several seconds per reply. Calculative keeps a little reasoning for
-    // accuracy; everything else uses minimal for speed.
+    // accuracy; 'minimal' was rejected by the API and broke non-calculative
+    // mode, so 'low' is used everywhere.
     generationConfig: {
-      thinkingConfig: { thinkingLevel: mode === 'calculative' ? 'low' : 'minimal' },
+      thinkingConfig: { thinkingLevel: 'low' },
       maxOutputTokens: 4096,
     },
   })
