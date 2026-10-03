@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import { renderToStaticMarkup } from 'react-dom/server'
 import 'katex/dist/katex.min.css'
 
 function EyeIcon({ color }) {
@@ -907,9 +908,153 @@ function useLongPress(onLongPress, ms = 480) {
 
 const noSelectStyle = { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }
 
-function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback }) {
+// Study Pack replies carry their flashcards/quiz as a hidden marker at the end
+// of the message text. It is stripped before display, copy, share and before
+// the history is sent back to the model.
+const STUDY_RE = /\n*<!--STUDY:([\s\S]*?)-->/
+
+function splitStudy(content) {
+  const raw = content || ''
+  const m = raw.match(STUDY_RE)
+  if (!m) return { text: raw, deck: null }
+  let deck = null
+  try { deck = JSON.parse(decodeURIComponent(m[1])) } catch (e) { deck = null }
+  return { text: raw.replace(STUDY_RE, '').trim(), deck }
+}
+
+// Must match the limit enforced in api/generate.js (check_rate_limit call).
+const HOURLY_LIMIT = 20
+
+function ShareIcon({ color }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <circle cx="18" cy="5" r="2.6" stroke={color} strokeWidth="1.8" />
+      <circle cx="6" cy="12" r="2.6" stroke={color} strokeWidth="1.8" />
+      <circle cx="18" cy="19" r="2.6" stroke={color} strokeWidth="1.8" />
+      <path d="M8.3 10.8l7.4-4.4M8.3 13.2l7.4 4.4" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function DownloadIcon({ color }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function StudyDeck({ deck, c }) {
+  const cards = Array.isArray(deck?.flashcards) ? deck.flashcards : []
+  const quiz = Array.isArray(deck?.quiz) ? deck.quiz : []
+  const [tab, setTab] = useState(cards.length ? 'cards' : 'quiz')
+  const [ci, setCi] = useState(0)
+  const [flipped, setFlipped] = useState(false)
+  const [qi, setQi] = useState(0)
+  const [picked, setPicked] = useState(null)
+  const [score, setScore] = useState(0)
+  const [done, setDone] = useState(false)
+
+  if (!cards.length && !quiz.length) return null
+
+  const tabBtn = (id, label) => (
+    <button
+      type="button"
+      onClick={() => setTab(id)}
+      style={{ ...styles.chipBtn, borderColor: c.border, backgroundColor: tab === id ? c.accent : 'transparent', color: tab === id ? c.accentText : c.text }}
+    >
+      {label}
+    </button>
+  )
+
+  const goCard = (next) => { setFlipped(false); setCi(next) }
+  const pickOption = (i) => {
+    if (picked !== null) return
+    setPicked(i)
+    if (i === Number(quiz[qi].answer)) setScore((v) => v + 1)
+  }
+  const nextQuestion = () => {
+    if (qi + 1 >= quiz.length) { setDone(true); return }
+    setQi(qi + 1)
+    setPicked(null)
+  }
+  const restartQuiz = () => { setQi(0); setPicked(null); setScore(0); setDone(false) }
+
+  return (
+    <div style={{ width: '100%', maxWidth: '420px', margin: '0.6rem 0 0.4rem', padding: '0.8rem', borderRadius: '16px', border: `1px solid ${c.border}`, backgroundColor: c.surface, color: c.text }}>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.7rem' }}>
+        {cards.length > 0 && tabBtn('cards', `Flashcards (${cards.length})`)}
+        {quiz.length > 0 && tabBtn('quiz', `Quiz (${quiz.length})`)}
+      </div>
+
+      {tab === 'cards' && cards.length > 0 && (
+        <div>
+          <div
+            onClick={() => setFlipped((v) => !v)}
+            style={{ minHeight: '140px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '1rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: flipped ? c.accent : c.bg, color: flipped ? c.accentText : c.text, cursor: 'pointer' }}
+          >
+            <span style={{ fontSize: '0.7rem', opacity: 0.7, marginBottom: '0.5rem' }}>{flipped ? 'ANSWER' : 'QUESTION (tap to flip)'}</span>
+            <span style={{ fontSize: '1rem', lineHeight: 1.5 }}>{flipped ? cards[ci].a : cards[ci].q}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.7rem' }}>
+            <button type="button" disabled={ci === 0} onClick={() => goCard(ci - 1)} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text, opacity: ci === 0 ? 0.4 : 1 }}>Prev</button>
+            <span style={{ fontSize: '0.8rem', color: c.subtext }}>{ci + 1} / {cards.length}</span>
+            <button type="button" disabled={ci === cards.length - 1} onClick={() => goCard(ci + 1)} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text, opacity: ci === cards.length - 1 ? 0.4 : 1 }}>Next</button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'quiz' && quiz.length > 0 && (
+        done ? (
+          <div style={{ textAlign: 'center', padding: '0.6rem 0' }}>
+            <p style={{ fontSize: '1.3rem', fontWeight: 'bold' }}>You scored {score} / {quiz.length}</p>
+            <p style={{ color: c.subtext, fontSize: '0.85rem', margin: '0.4rem 0 0.8rem' }}>
+              {score === quiz.length ? 'Perfect. You know this topic.' : score >= Math.ceil(quiz.length / 2) ? 'Good job. Review the ones you missed.' : 'Go through the flashcards again, then retry.'}
+            </p>
+            <button type="button" onClick={restartQuiz} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>Try again</button>
+          </div>
+        ) : (
+          <div>
+            <p style={{ fontSize: '0.75rem', color: c.subtext, marginBottom: '0.4rem' }}>Question {qi + 1} of {quiz.length}</p>
+            <p style={{ fontWeight: 'bold', marginBottom: '0.7rem', lineHeight: 1.5 }}>{quiz[qi].q}</p>
+            {(quiz[qi].options || []).map((opt, i) => {
+              const isCorrect = i === Number(quiz[qi].answer)
+              const isPicked = picked === i
+              let bg = 'transparent'
+              let border = c.border
+              if (picked !== null && isCorrect) { bg = 'rgba(34,197,94,0.18)'; border = '#22c55e' }
+              else if (isPicked) { bg = 'rgba(239,68,68,0.18)'; border = '#ef4444' }
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => pickOption(i)}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '0.6rem 0.8rem', marginBottom: '0.45rem', borderRadius: '12px', border: `1.5px solid ${border}`, backgroundColor: bg, color: c.text, fontSize: '0.88rem', cursor: picked === null ? 'pointer' : 'default' }}
+                >
+                  {String.fromCharCode(65 + i)}. {opt}
+                </button>
+              )
+            })}
+            {picked !== null && (
+              <div style={{ marginTop: '0.5rem' }}>
+                {quiz[qi].why && <p style={{ fontSize: '0.82rem', color: c.subtext, marginBottom: '0.6rem' }}>{picked === Number(quiz[qi].answer) ? 'Correct. ' : 'Not quite. '}{quiz[qi].why}</p>}
+                <button type="button" onClick={nextQuestion} style={{ ...styles.chipBtn, borderColor: c.border, backgroundColor: c.accent, color: c.accentText }}>
+                  {qi + 1 >= quiz.length ? 'See score' : 'Next question'}
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      )}
+    </div>
+  )
+}
+
+function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback, onShare, onExportPdf }) {
   const c = getPalette(theme, accentColor)
   const isUser = role === 'user'
+  const { text: displayText, deck } = isUser ? { text: content, deck: null } : splitStudy(content)
   // Only user messages get the custom long-press menu (copy/edit) — they have
   // no action buttons below them. AI replies already have copy/feedback
   // buttons right underneath, so long-pressing one falls through to normal
@@ -1006,14 +1151,21 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
               p: (props) => <p {...props} style={{ margin: '0 0 0.5rem 0' }} />,
             }}
           >
-            {content}
+            {displayText}
           </ReactMarkdown>
         </div>
       </div>
+      {!isUser && deck && <StudyDeck deck={deck} c={c} />}
       {!isUser && (
         <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.3rem', paddingLeft: '0.2rem' }}>
-          <button type="button" onClick={() => onCopy(content)} style={styles.msgFeedbackBtn} aria-label="Copy">
+          <button type="button" onClick={() => onCopy(displayText)} style={styles.msgFeedbackBtn} aria-label="Copy">
             <CopyIcon color={c.subtext} />
+          </button>
+          <button type="button" onClick={() => onShare(displayText)} style={styles.msgFeedbackBtn} aria-label="Share">
+            <ShareIcon color={c.subtext} />
+          </button>
+          <button type="button" onClick={() => onExportPdf(displayText)} style={styles.msgFeedbackBtn} aria-label="Save as PDF">
+            <DownloadIcon color={c.subtext} />
           </button>
           <button
             type="button"
@@ -1348,6 +1500,7 @@ function Dashboard({ session }) {
   const [accentColor, setAccentColor] = useState(() => localStorage.getItem('radius-accent') || 'green')
   const [mode, setMode] = useState('calculative')
   const [tool, setTool] = useState('chat')
+  const [usedThisHour, setUsedThisHour] = useState(null)
   const [subject, setSubject] = useState('')
   const [assignmentText, setAssignmentText] = useState('')
   const [attachedFiles, setAttachedFiles] = useState([])
@@ -1395,8 +1548,65 @@ function Dashboard({ session }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
+  useEffect(() => {
+    fetchUsage()
+    const timer = setInterval(fetchUsage, 60000)
+    return () => clearInterval(timer)
+  }, [])
+
   function handleCopyText(text) {
     navigator.clipboard?.writeText(text || '')
+  }
+
+  function handleShareText(text) {
+    const clean = text || ''
+    if (navigator.share) {
+      navigator.share({ title: 'RADIUS', text: clean }).catch(() => {})
+    } else {
+      navigator.clipboard?.writeText(clean)
+    }
+  }
+
+  // Opens the phone's print sheet with only this reply on the page. Choose
+  // "Save as PDF" there. Done in a hidden iframe so no popup blocker applies.
+  function handleExportPdf(text) {
+    try {
+      const html = renderToStaticMarkup(
+        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{text || ''}</ReactMarkdown>
+      )
+      const pageCss = Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).map((n) => n.outerHTML).join('\n')
+      const iframe = document.createElement('iframe')
+      iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;'
+      document.body.appendChild(iframe)
+      const doc = iframe.contentDocument
+      doc.open()
+      doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>RADIUS</title>${pageCss}<style>html,body{background:#fff !important;color:#000 !important;font-family:sans-serif;line-height:1.6}body{padding:24px}h1,h2,h3{margin:1em 0 .4em}</style></head><body>${html}<p style="margin-top:2em;font-size:12px;color:#666">Generated by RADIUS</p></body></html>`)
+      doc.close()
+      setTimeout(() => {
+        iframe.contentWindow.focus()
+        iframe.contentWindow.print()
+        setTimeout(() => iframe.remove(), 3000)
+      }, 800)
+    } catch (e) {
+      setError('Could not create the PDF. Try Share instead.')
+    }
+  }
+
+  // Counts this user's messages from the last hour. Each one is a request to
+  // the backend, so this matches the hourly limit closely without needing
+  // any new database function.
+  async function fetchUsage() {
+    try {
+      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      const { count, error: usageError } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('role', 'user')
+        .gte('created_at', since)
+      if (!usageError && typeof count === 'number') setUsedThisHour(count)
+    } catch (e) {
+      // best-effort only
+    }
   }
 
   function handleEditMessage(text) {
@@ -1706,8 +1916,9 @@ function Dashboard({ session }) {
 
       setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userContent })
+      fetchUsage()
 
-      const history = messages.map((m) => ({ role: m.role, content: m.content }))
+      const history = messages.map((m) => ({ role: m.role, content: splitStudy(m.content).text }))
 
       const controller = new AbortController()
       abortControllerRef.current = controller
@@ -1739,6 +1950,7 @@ function Dashboard({ session }) {
         await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: data.result })
         loadConversations()
         touchStreak()
+        fetchUsage()
       }
     } catch (err) {
       // A user-initiated stop shows no error - that's expected, not a failure.
@@ -1833,6 +2045,14 @@ function Dashboard({ session }) {
         <button onClick={handleNewChat} style={styles.iconBtn}><NewChatIcon color={c.text} /></button>
       </div>
 
+      <input
+        type="text"
+        placeholder="Subject (optional, e.g. Physics)"
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        style={{ ...styles.subjectInput, marginTop: '0.5rem', flexShrink: 0, backgroundColor: c.surface, borderColor: c.border, color: c.text }}
+      />
+
       <div style={styles.messagesArea}>
         {messages.length === 0 && !loading && (
           <div key={`${activeConversationId || 'new'}-${tool}`} className="radius-entrance" style={{ textAlign: 'center', margin: 'auto', padding: '0 1.2rem', maxWidth: '420px' }}>
@@ -1868,6 +2088,8 @@ function Dashboard({ session }) {
               feedback={m.feedback}
               onLongPress={(x, y, msg) => setLongPressMenu({ x, y, ...msg })}
               onCopy={handleCopyText}
+              onShare={handleShareText}
+              onExportPdf={handleExportPdf}
               onFeedback={handleSetFeedback}
             />
             {!loading && i === messages.length - 1 && m.role === 'assistant' && m.responseType === 'assignment' && (
@@ -1913,13 +2135,11 @@ function Dashboard({ session }) {
         ))}
       </div>
 
-      <input
-        type="text"
-        placeholder="Subject (optional, e.g. Physics)"
-        value={subject}
-        onChange={(e) => setSubject(e.target.value)}
-        style={{ ...styles.subjectInput, backgroundColor: c.surface, borderColor: c.border, color: c.text }}
-      />
+      {usedThisHour !== null && (
+        <p style={{ margin: '0 1.2rem 0.4rem 1.2rem', fontSize: '0.72rem', textAlign: 'right', color: usedThisHour >= HOURLY_LIMIT - 3 ? '#f59e0b' : c.subtext }}>
+          {usedThisHour >= HOURLY_LIMIT ? 'Hourly limit reached. Try again a bit later.' : `${HOURLY_LIMIT - usedThisHour} of ${HOURLY_LIMIT} requests left this hour`}
+        </p>
+      )}
 
       {attachedFiles.length > 0 && (
         <div style={{ margin: '0 1rem 0.6rem 1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -2159,7 +2379,7 @@ const TOOL_INFO = {
     steps: [
       'Paste your notes below, or attach photos or a PDF of them.',
       'Send it. RADIUS cleans up the notes and lists the key terms.',
-      'You get flashcards plus a 5 question quiz, with answers at the end.',
+      'You get tap-to-flip flashcards and a quiz that scores you.',
     ],
     tip: 'Tip: add the subject above for better results.',
   },
