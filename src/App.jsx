@@ -1567,6 +1567,7 @@ function Dashboard({ session }) {
     setSidebarOpen(false)
     setActiveConversationId(conv.id)
     setMode(conv.mode || 'calculative')
+    setTool('chat')
     setSubject(conv.subject || '')
     setError('')
     const { data, error } = await supabase
@@ -1834,9 +1835,25 @@ function Dashboard({ session }) {
 
       <div style={styles.messagesArea}>
         {messages.length === 0 && !loading && (
-          <div key={activeConversationId || 'new'} className="radius-entrance" style={{ textAlign: 'center', margin: 'auto' }}>
-            <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>Welcome, {displayName}</p>
-            <p style={{ color: c.subtext, marginTop: '0.4rem' }}>What assignment are we tackling today?</p>
+          <div key={`${activeConversationId || 'new'}-${tool}`} className="radius-entrance" style={{ textAlign: 'center', margin: 'auto', padding: '0 1.2rem', maxWidth: '420px' }}>
+            {tool === 'chat' || !TOOL_INFO[tool] ? (
+              <>
+                <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>Welcome, {displayName}</p>
+                <p style={{ color: c.subtext, marginTop: '0.4rem' }}>What assignment are we tackling today?</p>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>{TOOL_INFO[tool].title}</p>
+                <p style={{ color: c.subtext, marginTop: '0.4rem' }}>{TOOL_INFO[tool].summary}</p>
+                <div style={{ textAlign: 'left', marginTop: '1.2rem', padding: '0.9rem 1rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.surface }}>
+                  <p style={{ fontWeight: 'bold', fontSize: '0.85rem', marginBottom: '0.5rem' }}>How it works</p>
+                  {TOOL_INFO[tool].steps.map((step, i) => (
+                    <p key={i} style={{ fontSize: '0.85rem', color: c.subtext, marginTop: '0.35rem' }}>{i + 1}. {step}</p>
+                  ))}
+                </div>
+                <p style={{ color: c.subtext, fontSize: '0.8rem', marginTop: '0.9rem' }}>{TOOL_INFO[tool].tip}</p>
+              </>
+            )}
           </div>
         )}
 
@@ -1888,7 +1905,7 @@ function Dashboard({ session }) {
         {TOOLS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTool(t.id)}
+            onClick={() => { abortControllerRef.current?.abort(); handleNewChat(); setTool(t.id) }}
             style={{ ...styles.modeBtn, flexShrink: 0, whiteSpace: 'nowrap', backgroundColor: tool === t.id ? c.accent : 'transparent', color: tool === t.id ? c.accentText : c.subtext, borderColor: c.border }}
           >
             {t.label}
@@ -2134,6 +2151,49 @@ const TOOLS = [
   { id: 'cite', label: 'Citation' },
   { id: 'plan', label: 'Exam Plan' },
 ]
+
+const TOOL_INFO = {
+  notes: {
+    title: 'Study Pack',
+    summary: 'Turn messy lecture notes into clean notes, flashcards and a quiz.',
+    steps: [
+      'Paste your notes below, or attach photos or a PDF of them.',
+      'Send it. RADIUS cleans up the notes and lists the key terms.',
+      'You get flashcards plus a 5 question quiz, with answers at the end.',
+    ],
+    tip: 'Tip: add the subject above for better results.',
+  },
+  pastq: {
+    title: 'Past Question Trainer',
+    summary: 'Find out what to read first and practise on the topics that keep showing up.',
+    steps: [
+      'Paste or attach past questions for one course.',
+      'RADIUS maps the topics by how often they appear, ranks what to read first, and gives you 5 practice questions.',
+      'Reply with your answers. RADIUS marks them and shows your weak topics.',
+    ],
+    tip: 'Tip: the more past papers you add, the better the topic map.',
+  },
+  cite: {
+    title: 'Citation Fixer',
+    summary: 'Get a correctly formatted reference from a link, title or DOI.',
+    steps: [
+      'Paste a link, book or article title, or DOI.',
+      'Name a style (APA, Harvard, IEEE, MLA or Chicago). APA is used if you do not pick one.',
+      'You get the reference entry and the in-text citation. Missing details are marked in [brackets], never made up.',
+    ],
+    tip: 'Example: "Harvard: https://example.com/my-article"',
+  },
+  plan: {
+    title: 'Exam Planner',
+    summary: 'Get a day-by-day study plan that fits your exam dates.',
+    steps: [
+      'List your exams, their dates, the topics, and how many hours you can study a day.',
+      'RADIUS builds a day-by-day plan table, putting the sooner exams first.',
+      'Missed a day or something changed? Tell RADIUS and it rebuilds the rest of the plan.',
+    ],
+    tip: 'Example: "Physics Oct 20, Maths Oct 25, 3 hours a day"',
+  },
+}
 
 const TOOL_PLACEHOLDERS = {
   chat: 'Type your assignment here...',
