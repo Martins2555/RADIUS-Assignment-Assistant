@@ -1347,6 +1347,7 @@ function Dashboard({ session }) {
   const theme = themePreference === 'system' ? (systemPrefersDark ? 'dark' : 'light') : themePreference
   const [accentColor, setAccentColor] = useState(() => localStorage.getItem('radius-accent') || 'green')
   const [mode, setMode] = useState('calculative')
+  const [tool, setTool] = useState('chat')
   const [subject, setSubject] = useState('')
   const [assignmentText, setAssignmentText] = useState('')
   const [attachedFiles, setAttachedFiles] = useState([])
@@ -1719,6 +1720,7 @@ function Dashboard({ session }) {
         body: JSON.stringify({
           subject,
           mode,
+          tool,
           assignmentText: userText,
           history,
           images: filesForApi,
@@ -1817,10 +1819,16 @@ function Dashboard({ session }) {
 
       <div style={styles.topBar}>
         <button onClick={() => setSidebarOpen(true)} style={styles.iconBtn}><MenuIcon color={c.text} /></button>
-        <div style={styles.modeToggle}>
-          <button onClick={() => setMode('calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'calculative' ? c.accent : 'transparent', color: mode === 'calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Calculative</button>
-          <button onClick={() => setMode('non-calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'non-calculative' ? c.accent : 'transparent', color: mode === 'non-calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Non-Calculative</button>
-        </div>
+        {tool === 'chat' ? (
+          <div style={styles.modeToggle}>
+            <button onClick={() => setMode('calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'calculative' ? c.accent : 'transparent', color: mode === 'calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Calculative</button>
+            <button onClick={() => setMode('non-calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'non-calculative' ? c.accent : 'transparent', color: mode === 'non-calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Non-Calculative</button>
+          </div>
+        ) : (
+          <div style={styles.modeToggle}>
+            <span style={{ ...styles.modeBtn, backgroundColor: c.accent, color: c.accentText, borderColor: c.border }}>{(TOOLS.find((t) => t.id === tool) || {}).label}</span>
+          </div>
+        )}
         <button onClick={handleNewChat} style={styles.iconBtn}><NewChatIcon color={c.text} /></button>
       </div>
 
@@ -1874,6 +1882,18 @@ function Dashboard({ session }) {
         {error && <p style={{ color: '#ef4444', padding: '0.4rem 0', textAlign: 'center' }}>{error}</p>}
 
         <div ref={messagesEndRef} />
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.4rem', overflowX: 'auto', margin: '0 1rem 0.5rem 1rem', flexShrink: 0 }}>
+        {TOOLS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTool(t.id)}
+            style={{ ...styles.modeBtn, flexShrink: 0, whiteSpace: 'nowrap', backgroundColor: tool === t.id ? c.accent : 'transparent', color: tool === t.id ? c.accentText : c.subtext, borderColor: c.border }}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       <input
@@ -1961,7 +1981,7 @@ function Dashboard({ session }) {
         <textarea
           ref={textAreaRef}
           rows={1}
-          placeholder="Type your assignment here..."
+          placeholder={TOOL_PLACEHOLDERS[tool]}
           value={assignmentText}
           onChange={(e) => {
             setAssignmentText(e.target.value)
@@ -2105,6 +2125,22 @@ function App() {
   }
 
   return <AuthScreen initialSignUp={authSignUp} />
+}
+
+const TOOLS = [
+  { id: 'chat', label: 'Assignment' },
+  { id: 'notes', label: 'Study Pack' },
+  { id: 'pastq', label: 'Past Qs' },
+  { id: 'cite', label: 'Citation' },
+  { id: 'plan', label: 'Exam Plan' },
+]
+
+const TOOL_PLACEHOLDERS = {
+  chat: 'Type your assignment here...',
+  notes: 'Paste or attach your lecture notes...',
+  pastq: 'Paste or attach past questions for a course...',
+  cite: 'Paste a link, title, or DOI to get a reference...',
+  plan: 'List your exams, dates, topics and hours per day...',
 }
 
 const styles = {
