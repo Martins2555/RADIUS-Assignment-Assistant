@@ -8,6 +8,53 @@ const supabaseAuth = createClient(
   process.env.VITE_SUPABASE_ANON_KEY
 )
 
+// ---------------------------------------------------------------------------
+// Provider fallback chain
+// Gemini is tried first (it is the only one here that reads images/PDFs).
+// If it is rate limited, overloaded or errors, the request automatically goes
+// to the next provider below. A provider is only used if its API key env var
+// is set in Vercel, so missing keys never break anything. Model names can be
+// changed from Vercel env vars without touching code.
+// ---------------------------------------------------------------------------
+const OPENAI_COMPAT_PROVIDERS = [
+  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', keyEnv: 'GROQ_API_KEY', model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile' },
+  { name: 'mistral', url: 'https://api.mistral.ai/v1/chat/completions', keyEnv: 'MISTRAL_API_KEY', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' },
+  { name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', keyEnv: 'CEREBRAS_API_KEY', model: process.env.CEREBRAS_MODEL || 'llama-3.3-70b' },
+  { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', keyEnv: 'OPENROUTER_API_KEY', model: process.env.OPENROUTER_MODEL || 'openrouter/free' },
+]
+
+// ---------------------------------------------------------------------------
+// Study tools. 'chat' is the normal assignment assistant behaviour.
+// ---------------------------------------------------------------------------
+const VALID_TOOLS = ['chat', 'notes', 'pastq', 'cite', 'plan']
+
+function toolInstruction(tool, todayText) {
+  switch (tool) {
+    case 'notes':
+      return `TOOL: STUDY PACK. The student gives lecture notes (typed, pasted, or photographed). Reply using these markdown headings in this order:
+## Clean Notes (organised with sub-headings, errors corrected)
+## Key Terms (term: one-line meaning)
+## Flashcards (up to 10, each as **Q:** question then **A:** answer)
+## Practice Quiz (5 questions of mixed types, answers NOT shown)
+## Answers (answers to the quiz with a one-line reason each)
+Only use facts supported by the notes or standard accepted knowledge of the subject. If something in the notes looks wrong or unclear, list it under a short "## Check These" heading at the end. Use [TYPE:ASSIGNMENT] for the tag.`
+    case 'pastq':
+      return `TOOL: PAST QUESTION TRAINER. The student gives past exam questions (typed or attached) for a course.
+First message with questions: reply with
+## Topic Map (group the questions by topic and show how often each topic appears, most frequent first)
+## Read First (a ranked reading order with one line on why)
+## Practice Round (5 new exam-style questions on the top topics, answers NOT shown)
+Then ask the student to reply with their answers.
+When the student replies with answers: mark each one, briefly explain mistakes, then give "## Weak Topics" ranked with what to study next. Remember results across the conversation so weak topics build up over rounds. Use [TYPE:ASSIGNMENT] for the tag.`
+    case 'cite':
+      return `TOOL: CITATION FIXER. The student gives a source (URL, title, DOI, or raw details). Format it in the requested style (APA 7, Harvard, IEEE, MLA or Chicago). If no style is given, use APA 7 and say so in one short line. Give the reference list entry, then the in-text citation. NEVER invent authors, years, titles, publishers, or page numbers. If a detail is missing, put it in square brackets like [year] and list what the student should look up. Keep the reply short. Use [TYPE:GENERAL] for the tag.`
+    case 'plan':
+      return `TOOL: EXAM PLANNER. Today is ${todayText}. The student gives exam dates and topics, and maybe hours available per day. Build a day-by-day study plan from today up to the last exam: prioritise sooner exams and topics the student says are weak, include short revision slots and a rest buffer, and show it as a markdown table with columns Date, Focus, Hours. If details are missing, make sensible assumptions and state them in one line instead of asking many questions. If the student later says they missed days or things changed, rebuild only the remaining days. Use [TYPE:ASSIGNMENT] for the tag.`
+    default:
+      return ''
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -57,7 +104,9 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "You've hit the hourly limit for assignment requests. Please wait a bit and try again." })
   }
 
-  const { subject, mode, assignmentText, history, images, nickname, responseStyle } = req.body
+  const { subject, mode, assignmentText, history, images, nickname, responseStyle, tool: rawTool } = req.body
+  const tool = VALID_TOOLS.includes(rawTool) ? rawTool : 'chat'
+  const todayText = new Date().toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const imageList = Array.isArray(images) ? images.slice(0, 10) : []
 
   if (!assignmentText && imageList.length === 0) {
@@ -81,6 +130,13 @@ export default async function handler(req, res) {
   }
   const styleLine = STYLE_HINTS[responseStyle] || STYLE_HINTS.balanced
 
+  const modeLine = tool === 'chat'
+    ? `The subject is "${subject || 'unspecified'}" and the mode is "${mode}" (calculative means math/physics/engineering style problems requiring computation, non-calculative means writing/history/humanities style tasks).`
+    : `The subject is "${subject || 'unspecified'}". ${toolInstruction(tool, todayText)}`
+  const closingLine = tool === 'chat'
+    ? 'For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 steps) covering research and structure. For calculative mode: break the problem down and solve it fully, showing every step.'
+    : ''
+
   const systemInstruction = `You are RADIUS, an assignment assistant for students.
 
 CREATOR INFO — IMPORTANT: Only mention who developed you if the student directly and explicitly asks (e.g. "who made you", "who developed you", "who created RADIUS"). In that case, and only that case, say you were developed by Martins Chimezie Obasi, and never mention Google, Gemini, or any other company. Do NOT bring this up unprompted — not in greetings, not in your first reply, not anywhere else unless directly asked.
@@ -94,7 +150,7 @@ RESPONSE TAGGING — REQUIRED: As the very first thing in your reply, before any
 [TYPE:GENERAL] if it is a greeting, small talk, feedback, or a question about RADIUS itself rather than an academic question.
 Then continue your normal reply starting on the next line. Never explain or mention this tag to the student.
 
-The subject is "${subject || 'unspecified'}" and the mode is "${mode}" (calculative means math/physics/engineering style problems requiring computation, non-calculative means writing/history/humanities style tasks).
+${modeLine}
 
 Answer length preference: ${styleLine}
 
@@ -110,7 +166,7 @@ MATH FORMATTING RULES (calculative mode):
 
 IMAGES: If the student attaches images or files, they may contain handwritten or printed assignments, problems, or questions — possibly spanning multiple pages or multiple related items. Read all of them carefully and respond to what they actually contain, treating them as one combined assignment unless they clearly look unrelated.
 
-For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 steps) covering research and structure. For calculative mode: break the problem down and solve it fully, showing every step.`
+${closingLine}`
 
   const contents = []
 
@@ -149,85 +205,137 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
   currentParts.push(...fetchedParts.filter(Boolean))
   contents.push({ role: 'user', parts: currentParts })
 
-  // Two model IDs in a fallback chain, not one - gemini-3.7-flash has been
-  // seeing sustained 503 "overloaded" errors on Google's end recently
-  // (confirmed on Google's own developer forums, not specific to this app).
-  // Retrying the *same* overloaded model rarely helps during a sustained
-  // outage; falling back to a different model does.
-  const MODEL_CHAIN = ['gemini-3.7-flash', 'gemini-3.6-flash']
-  const geminiUrlFor = (model) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-  const requestBody = JSON.stringify({
+  // ---- Build the list of providers to try, in order ----
+  const hasFiles = currentParts.some((p) => p.inline_data)
+  const geminiKey = process.env.GEMINI_API_KEY
+  const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash']
+
+  const geminiBody = JSON.stringify({
     system_instruction: { parts: [{ text: systemInstruction }] },
     contents,
     // Gemini 3 defaults to HIGH thinking when this is unset, which adds
-    // several seconds per reply. Calculative keeps a little reasoning for
-    // accuracy; 'minimal' was rejected by the API and broke non-calculative
-    // mode, so 'low' is used everywhere.
+    // several seconds per reply. 'minimal' was rejected by the API and broke
+    // non-calculative mode, so 'low' is used everywhere.
     generationConfig: {
       thinkingConfig: { thinkingLevel: 'low' },
       maxOutputTokens: 4096,
     },
   })
 
-  async function callGeminiOnce(model) {
-    const response = await fetch(geminiUrlFor(model), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: requestBody,
-    })
-    const data = await response.json()
-    return { response, data }
+  // Plain text version of the conversation for the non-Gemini providers.
+  const chatMessages = [
+    { role: 'system', content: systemInstruction },
+    ...contents.map((c) => ({
+      role: c.role === 'model' ? 'assistant' : 'user',
+      content: c.parts.filter((p) => p.text).map((p) => p.text).join('\n'),
+    })),
+  ]
+
+  async function tryGemini(model) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: geminiBody,
+        signal: AbortSignal.timeout(25000),
+      }
+    )
+    const data = await response.json().catch(() => null)
+    if (!response.ok) {
+      return { ok: false, status: response.status, detail: data?.error?.message }
+    }
+    const parts = data?.candidates?.[0]?.content?.parts || []
+    const text = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
+    return text ? { ok: true, text } : { ok: false, status: 502, detail: 'empty reply' }
   }
 
-  async function callGeminiWithRetry(maxRetries = 1) {
-    let lastResponse, lastData
-    for (const model of MODEL_CHAIN) {
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        const { response, data } = await callGeminiOnce(model)
-
-        // 503 = model temporarily overloaded on Google's end - worth a quick
-        // retry, then worth trying the next model in the chain rather than
-        // hammering the same overloaded one repeatedly.
-        const isRetryable = response.status === 429 || response.status === 503
-        if (!isRetryable) {
-          return { response, data }
-        }
-
-        lastResponse = response
-        lastData = data
-        if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, 500))
-        }
-      }
-      // Exhausted retries on this model - fall through to the next one in
-      // MODEL_CHAIN before giving up entirely.
+  async function tryCompat(provider) {
+    const response = await fetch(provider.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env[provider.keyEnv]}`,
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: chatMessages,
+        max_tokens: 4096,
+      }),
+      signal: AbortSignal.timeout(20000),
+    })
+    const data = await response.json().catch(() => null)
+    if (!response.ok) {
+      return { ok: false, status: response.status, detail: data?.error?.message }
     }
-    return { response: lastResponse, data: lastData }
+    const text = data?.choices?.[0]?.message?.content
+    return text ? { ok: true, text } : { ok: false, status: 502, detail: 'empty reply' }
+  }
+
+  const attempts = []
+  if (geminiKey) {
+    for (const model of GEMINI_MODELS) {
+      attempts.push({ label: `gemini:${model}`, retryOnBusy: true, run: () => tryGemini(model) })
+    }
+  }
+  // Other providers only take text. If the message has images/PDFs, only
+  // Gemini can read them, so the fallback chain is skipped for those.
+  if (!hasFiles) {
+    for (const provider of OPENAI_COMPAT_PROVIDERS) {
+      if (process.env[provider.keyEnv]) {
+        attempts.push({ label: `${provider.name}:${provider.model}`, retryOnBusy: false, run: () => tryCompat(provider) })
+      }
+    }
   }
 
   try {
-    const { response, data } = await callGeminiWithRetry()
+    let text = null
+    let sawRateLimit = false
+    let sawOverload = false
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return res.status(429).json({ error: 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.' })
+    for (const attempt of attempts) {
+      const maxTries = attempt.retryOnBusy ? 2 : 1
+      for (let i = 0; i < maxTries && text === null; i++) {
+        let result
+        try {
+          result = await attempt.run()
+        } catch (e) {
+          console.error(`Provider ${attempt.label} threw:`, e?.message)
+          break
+        }
+        if (result.ok) {
+          text = result.text
+          console.log(`Reply served by ${attempt.label}`)
+          break
+        }
+        console.error(`Provider ${attempt.label} failed:`, result.status, result.detail)
+        if (result.status === 429) sawRateLimit = true
+        if (result.status === 503) sawOverload = true
+        const busy = result.status === 429 || result.status === 503
+        if (busy && i < maxTries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500))
+          continue
+        }
+        break
       }
-      if (response.status === 503) {
-        return res.status(503).json({ error: 'RADIUS is briefly overloaded. Please try again in a few seconds.' })
-      }
-      // Never leak the raw upstream error message to the user - it can be
-      // oddly specific/internal-sounding. Full detail still goes to the
-      // Vercel logs for debugging.
-      console.error('Gemini API error:', response.status, data?.error?.message)
-      return res.status(response.status).json({ error: "Something went wrong on RADIUS's end. Please try again." })
+      if (text !== null) break
     }
 
-    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.'
+    if (text === null) {
+      if (sawRateLimit) {
+        return res.status(429).json({ error: 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.' })
+      }
+      if (sawOverload) {
+        return res.status(503).json({ error: 'RADIUS is briefly overloaded. Please try again in a few seconds.' })
+      }
+      // Never leak the raw upstream error message to the user. Full detail
+      // is in the Vercel logs above.
+      return res.status(500).json({ error: "Something went wrong on RADIUS's end. Please try again." })
+    }
 
     // Strip the required leading type tag and use it to decide whether the
     // frontend should show assignment follow-up actions (hint/quiz/etc).
-    // Defaults to 'general' (no chips) if the model ever forgets the tag -
-    // the safer failure mode is chips missing, not chips showing wrongly.
+    // Defaults to 'general' (no chips) if the model ever forgets the tag.
     let responseType = 'general'
     const tagMatch = text.match(/^\s*\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/i)
     if (tagMatch) {
@@ -237,6 +345,7 @@ For non-calculative mode: give a clear, numbered, actionable breakdown (3-6 step
 
     return res.status(200).json({ result: text, responseType })
   } catch (err) {
-    return res.status(500).json({ error: err.message })
+    console.error('generate.js error:', err)
+    return res.status(500).json({ error: "Something went wrong on RADIUS's end. Please try again." })
   }
 }
