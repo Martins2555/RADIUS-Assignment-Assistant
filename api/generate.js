@@ -34,10 +34,10 @@ function toolInstruction(tool, todayText) {
       return `TOOL: STUDY PACK. The student gives lecture notes (typed, pasted, or photographed). Reply using these markdown headings in this order:
 ## Clean Notes (organised with sub-headings, errors corrected)
 ## Key Terms (term: one-line meaning)
-## Flashcards (up to 10, each as **Q:** question then **A:** answer)
-## Practice Quiz (5 questions of mixed types, answers NOT shown)
-## Answers (answers to the quiz with a one-line reason each)
-Only use facts supported by the notes or standard accepted knowledge of the subject. If something in the notes looks wrong or unclear, list it under a short "## Check These" heading at the end. Use [TYPE:ASSIGNMENT] for the tag.`
+## Check These (only if something in the notes looks wrong or unclear; otherwise leave this heading out)
+Do NOT write flashcards or quiz questions in the visible reply. Instead, end your reply with one block of strict JSON wrapped exactly like this, with no code fences and nothing after it:
+<study_data>{"flashcards":[{"q":"question","a":"short answer"}],"quiz":[{"q":"question","options":["option text","option text","option text","option text"],"answer":0,"why":"one line reason"}]}</study_data>
+Rules for the JSON: up to 8 flashcards; exactly 5 multiple choice quiz questions with 4 options each; "answer" is the zero-based index of the correct option; options are plain text without letters like A) or B); only use facts supported by the notes or standard accepted knowledge of the subject; the JSON must be valid. Use [TYPE:ASSIGNMENT] for the tag.`
     case 'pastq':
       return `TOOL: PAST QUESTION TRAINER. The student gives past exam questions (typed or attached) for a course.
 First message with questions: reply with
@@ -341,6 +341,41 @@ ${closingLine}`
     if (tagMatch) {
       responseType = tagMatch[1].toLowerCase()
       text = text.slice(tagMatch[0].length)
+    }
+
+    // Study Pack: pull the structured flashcards/quiz out of the reply and
+    // attach them as a hidden marker the app turns into interactive cards.
+    if (tool === 'notes') {
+      const idx = text.indexOf('<study_data>')
+      if (idx !== -1) {
+        const raw = text
+          .slice(idx + '<study_data>'.length)
+          .replace(/<\/study_data>[\s\S]*$/i, '')
+          .replace(/```json|```/g, '')
+          .trim()
+        text = text.slice(0, idx).trim()
+        let deck = null
+        try {
+          const parsed = JSON.parse(raw)
+          const flashcards = (Array.isArray(parsed.flashcards) ? parsed.flashcards : [])
+            .filter((c) => c && typeof c.q === 'string' && typeof c.a === 'string')
+            .slice(0, 12)
+          const quiz = (Array.isArray(parsed.quiz) ? parsed.quiz : [])
+            .filter((q) => q && typeof q.q === 'string' && Array.isArray(q.options) && q.options.length >= 2 && Number.isInteger(Number(q.answer)) && Number(q.answer) >= 0 && Number(q.answer) < q.options.length)
+            .slice(0, 8)
+            .map((q) => ({ q: q.q, options: q.options.map(String), answer: Number(q.answer), why: typeof q.why === 'string' ? q.why : '' }))
+          if (flashcards.length || quiz.length) deck = { flashcards, quiz }
+        } catch (e) {
+          console.error('Study data parse failed:', e?.message)
+        }
+        if (deck) {
+          text += `\n\n<!--STUDY:${encodeURIComponent(JSON.stringify(deck))}-->`
+        } else {
+          text += '\n\n_Flashcards and quiz could not be generated this time. Send your notes again to retry._'
+        }
+      } else {
+        text += '\n\n_Flashcards and quiz could not be generated this time. Send your notes again to retry._'
+      }
     }
 
     return res.status(200).json({ result: text, responseType })
