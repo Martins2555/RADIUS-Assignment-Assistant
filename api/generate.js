@@ -784,6 +784,25 @@ ${closingLine}`
       } catch (e) {
         if (e?.message !== 'already-handled') console.error('Background save failed:', e?.message)
       }
+    } else if (!clientGone && typeof conversationId === 'string' && /^[0-9a-f-]{36}$/i.test(conversationId)) {
+      // The connection is still open, but a phone that put RADIUS in the
+      // background usually freezes the page, so the answer sits unread in the
+      // network buffer and nobody notices. Send a push for any slower answer.
+      // The service worker skips showing it when RADIUS is open on screen.
+      const tookMs = Date.now() - (Date.parse(requestStartedAt) + 1500)
+      if (tookMs > 6000) {
+        try {
+          await Promise.race([
+            sendPushToUser(
+              supabaseAsUser,
+              userData.user.id,
+              { title: 'Your answer is ready', body: 'RADIUS finished working on your question. Tap to read it.', tag: 'radius-reply', url: `/?open=${conversationId}` },
+              'notify_replies'
+            ),
+            new Promise((resolve) => setTimeout(resolve, 3000)),
+          ])
+        } catch (e) { /* best-effort */ }
+      }
     }
 
     if (wantStream) {
