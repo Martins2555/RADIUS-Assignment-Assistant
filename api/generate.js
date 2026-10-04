@@ -55,6 +55,43 @@ When the student replies with answers: mark each one, briefly explain mistakes, 
   }
 }
 
+// ---------------------------------------------------------------------------
+// Live web search (Tavily). Gives every provider, including the free backup
+// ones, access to recent information. Only runs for non-calculative chat
+// messages that look like they need fresh facts, to save the monthly quota.
+// Needs TAVILY_API_KEY in Vercel. Set SEARCH_ALWAYS=true to search every time.
+// ---------------------------------------------------------------------------
+const SEARCH_HINTS = /\b(latest|newest|current|currently|recent|recently|today|tonight|this (year|month|week)|news|updates?|updated|releas(e|ed|es)|launch(ed|es)?|announce[sd]?|prices?|version|202[3-9]|who is the|who won|champions?|president|prime minister|ceo|trending|breakthrough|discover(y|ies)|iphone|galaxy|pixel|samsung|apple|google|openai|chatgpt|gpt|gemini|claude|windows|android|ios|tesla|bitcoin|crypto|ethereum|election|world cup|premier league|exchange rate|stock|inflation|policy)\b/i
+
+async function webSearch(query) {
+  const key = process.env.TAVILY_API_KEY
+  if (!key) return []
+  try {
+    const r = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ query, search_depth: 'basic', max_results: 5 }),
+      signal: AbortSignal.timeout(6000),
+    })
+    if (!r.ok) {
+      console.error('Web search failed:', r.status)
+      return []
+    }
+    const d = await r.json()
+    return (Array.isArray(d.results) ? d.results : [])
+      .filter((x) => x && x.url && x.content)
+      .slice(0, 5)
+      .map((x) => ({
+        title: String(x.title || x.url).replace(/[\[\]]/g, '').slice(0, 120),
+        url: x.url,
+        content: String(x.content).slice(0, 500),
+      }))
+  } catch (e) {
+    console.error('Web search error:', e?.message)
+    return []
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -170,7 +207,7 @@ MATH FORMATTING RULES (calculative mode):
 
 TABLES: When the student asks for a table, a comparison, a schedule, or any tabulated data, output a valid GitHub-flavoured markdown table: one header row, then a separator row like | --- | --- |, then each data row on its own line, with exactly the same number of columns in every row. Put a blank line before and after the table. Keep cell text short with no line breaks inside cells, and write every row before any commentary. Use - for a value you do not know instead of guessing. Put your verdict or summary in one or two sentences after the table, never inside it.
 
-ACCURACY: Only state facts you are confident about. For products, events or figures that may be newer than your knowledge or are not officially confirmed (for example unreleased phones), say clearly that the details are unconfirmed or estimated, and never present rumours or guesses as confirmed specs.
+CURRENT INFORMATION: Today's date is ${todayText}. Your built-in knowledge stops at an earlier date, so newer products, events, releases, prices, rules and research may exist that you do not know about. Never tell the student that something does not exist, has not been released, or has not happened just because you do not recognise it. If a WEB SEARCH RESULTS block is included in the student's message, treat it as newer than your training and base your answer on it, referring to results as [1], [2] and so on. If it does not answer the question, say so. If there are no search results, say you cannot confirm the very latest details and give your best understanding without denying anything. Never present rumours or guesses as confirmed facts, and never describe a past year as the present.
 
 IMAGES: If the student attaches images or files, they may contain handwritten or printed assignments, problems, or questions — possibly spanning multiple pages or multiple related items. Read all of them carefully and respond to what they actually contain, treating them as one combined assignment unless they clearly look unrelated.
 
@@ -187,8 +224,25 @@ ${closingLine}`
     }
   }
 
+  // ---- Optional live web search (see top of file) ----
+  let searchResults = []
+  const searchEligible =
+    tool === 'chat' &&
+    mode !== 'calculative' &&
+    typeof assignmentText === 'string' &&
+    assignmentText.trim().length > 3 &&
+    (process.env.SEARCH_ALWAYS === 'true' || SEARCH_HINTS.test(assignmentText))
+  if (searchEligible) {
+    const q = assignmentText.replace(/^\[The student is replying to [\s\S]*?"\]\s*/i, '').trim().slice(0, 300)
+    if (q) searchResults = await webSearch(q)
+  }
+  const searchBlock = searchResults.length
+    ? `\n\n[WEB SEARCH RESULTS fetched just now (today is ${todayText}). They are newer than your training data. Base your answer on them for anything recent, refer to them as [1], [2] and so on when you use them, and if they do not answer the question, say so instead of guessing.]\n` +
+      searchResults.map((r, i) => `[${i + 1}] ${r.title} (${r.url})\n${r.content}`).join('\n\n')
+    : ''
+
   const currentParts = []
-  if (assignmentText) currentParts.push({ text: assignmentText })
+  if (assignmentText) currentParts.push({ text: assignmentText + searchBlock })
 
   // Files are fetched server-side from their (already-uploaded) Supabase signed
   // URL rather than shipped as base64 in the request body. Vercel serverless
@@ -472,6 +526,10 @@ ${closingLine}`
       } else {
         text += '\n\n_Flashcards and quiz could not be generated this time. Send your notes again to retry._'
       }
+    }
+
+    if (searchResults.length) {
+      text += '\n\n**Sources**\n' + searchResults.map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n')
     }
 
     if (wantStream) {
