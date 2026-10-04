@@ -1019,16 +1019,35 @@ function ReplyIcon({ color }) {
 // tables that scroll sideways (marked data-noswipe) are left alone.
 const SWIPE_TRIGGER = 56
 function useSwipeReply(onReply) {
-  const [dx, setDx] = useState(0)
+  // The drag is applied straight to the DOM (no React state), so a long
+  // answer is not re-rendered on every finger movement. That re-rendering is
+  // what made the bubbles feel stuck.
+  const bubbleRef = useRef(null)
+  const iconRef = useRef(null)
   const startRef = useRef(null)
   const lockRef = useRef(null)
   const firedRef = useRef(false)
+
+  const apply = (dx, animate) => {
+    const b = bubbleRef.current
+    if (b) {
+      b.style.transition = animate ? 'transform 0.18s ease' : 'none'
+      b.style.transform = dx ? `translateX(${dx}px)` : 'none'
+    }
+    const ic = iconRef.current
+    if (ic) {
+      ic.style.opacity = dx > 8 ? String(Math.min(1, dx / SWIPE_TRIGGER)) : '0'
+      ic.style.transform = `scale(${dx >= SWIPE_TRIGGER ? 1.1 : 0.85})`
+    }
+  }
 
   const reset = () => {
     startRef.current = null
     lockRef.current = null
     firedRef.current = false
-    setDx(0)
+    const b = bubbleRef.current
+    if (b) b.style.userSelect = ''
+    apply(0, true)
   }
 
   const onTouchStart = (e) => {
@@ -1048,15 +1067,22 @@ function useSwipeReply(onReply) {
     const t = e.touches[0]
     const ddx = t.clientX - start.x
     const ddy = t.clientY - start.y
-    if (lockRef.current === null && (Math.abs(ddx) > 10 || Math.abs(ddy) > 10)) {
-      lockRef.current = ddx > 0 && Math.abs(ddx) > Math.abs(ddy) * 1.4 ? 'h' : 'v'
+    const ax = Math.abs(ddx)
+    const ay = Math.abs(ddy)
+    if (lockRef.current === null && (ax > 12 || ay > 12)) {
+      // Decided after a little movement, and lenient on purpose: a slightly
+      // diagonal swipe to the right still counts.
+      lockRef.current = ddx > 0 && ax >= ay * 0.7 ? 'h' : 'v'
+      if (lockRef.current === 'h' && bubbleRef.current) bubbleRef.current.style.userSelect = 'none'
     }
     if (lockRef.current === 'h') {
-      const next = Math.min(ddx, 80)
-      setDx(next)
+      const next = Math.max(0, Math.min(ddx, 80))
+      apply(next, false)
       if (next >= SWIPE_TRIGGER && !firedRef.current) {
         firedRef.current = true
         try { navigator.vibrate?.(12) } catch (err) { /* ignore */ }
+      } else if (next < SWIPE_TRIGGER - 12) {
+        firedRef.current = false
       }
     }
   }
@@ -1066,7 +1092,7 @@ function useSwipeReply(onReply) {
     reset()
   }
 
-  return { dx, handlers: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: reset } }
+  return { bubbleRef, iconRef, handlers: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: reset } }
 }
 
 // Study Pack replies carry their flashcards/quiz as a hidden marker at the end
@@ -1129,7 +1155,16 @@ function StudyDeck({ deck, c }) {
     </button>
   )
 
-  const goCard = (next) => { setFlipped(false); setCi(next) }
+  // Flip back first, then swap the card, so the next answer is never seen
+  // through the back of the card while it turns.
+  const goCard = (next) => {
+    if (flipped) {
+      setFlipped(false)
+      setTimeout(() => setCi(next), 230)
+    } else {
+      setCi(next)
+    }
+  }
   const pickOption = (i) => {
     if (picked !== null) return
     setPicked(i)
@@ -1151,12 +1186,17 @@ function StudyDeck({ deck, c }) {
 
       {tab === 'cards' && cards.length > 0 && (
         <div>
-          <div
-            onClick={() => setFlipped((v) => !v)}
-            style={{ minHeight: '140px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '1rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: flipped ? c.accent : c.bg, color: flipped ? c.accentText : c.text, cursor: 'pointer' }}
-          >
-            <span style={{ fontSize: '0.7rem', opacity: 0.7, marginBottom: '0.5rem' }}>{flipped ? 'ANSWER' : 'QUESTION (tap to flip)'}</span>
-            <span style={{ fontSize: '1rem', lineHeight: 1.5 }}>{flipped ? cards[ci].a : cards[ci].q}</span>
+          <div onClick={() => setFlipped((v) => !v)} style={{ perspective: '1000px', cursor: 'pointer' }}>
+            <div style={{ display: 'grid', transformStyle: 'preserve-3d', transition: 'transform 0.5s cubic-bezier(0.4, 0.2, 0.2, 1)', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+              <div style={{ gridArea: '1 / 1', minHeight: '150px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '1rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.bg, color: c.text, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
+                <span style={{ fontSize: '0.7rem', opacity: 0.7, marginBottom: '0.5rem' }}>QUESTION (tap to flip)</span>
+                <span style={{ fontSize: '1rem', lineHeight: 1.5 }}>{cards[ci].q}</span>
+              </div>
+              <div style={{ gridArea: '1 / 1', minHeight: '150px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '1rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.accent, color: c.accentText, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                <span style={{ fontSize: '0.7rem', opacity: 0.8, marginBottom: '0.5rem' }}>ANSWER</span>
+                <span style={{ fontSize: '1rem', lineHeight: 1.5 }}>{cards[ci].a}</span>
+              </div>
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.7rem' }}>
             <button type="button" disabled={ci === 0} onClick={() => goCard(ci - 1)} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text, opacity: ci === 0 ? 0.4 : 1 }}>Prev</button>
@@ -1227,17 +1267,14 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
   const swipe = useSwipeReply(() => onReply(role, displayText))
 
   return (
-    <div {...swipe.handlers} style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.35rem' }}>
-      {swipe.dx > 8 && (
-        <div style={{ position: 'absolute', left: '6px', top: '14px', width: '30px', height: '30px', borderRadius: '50%', backgroundColor: c.surface, border: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: Math.min(1, swipe.dx / SWIPE_TRIGGER), transform: `scale(${swipe.dx >= SWIPE_TRIGGER ? 1.1 : 0.85})` }}>
-          <ReplyIcon color={c.text} />
-        </div>
-      )}
+    <div {...swipe.handlers} style={{ touchAction: 'pan-y', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.35rem' }}>
+      <div ref={swipe.iconRef} style={{ position: 'absolute', left: '6px', top: '14px', width: '30px', height: '30px', borderRadius: '50%', backgroundColor: c.surface, border: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, transform: 'scale(0.85)', pointerEvents: 'none' }}>
+        <ReplyIcon color={c.text} />
+      </div>
       <div
+        ref={swipe.bubbleRef}
         {...pressHandlers}
         style={{
-          transform: swipe.dx ? `translateX(${swipe.dx}px)` : 'none',
-          transition: swipe.dx ? 'none' : 'transform 0.18s ease',
           maxWidth: '85%',
           padding: '0.7rem 1rem',
           borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
