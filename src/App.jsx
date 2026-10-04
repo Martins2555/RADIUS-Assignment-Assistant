@@ -1207,13 +1207,54 @@ function useSwipeReply(onReply) {
 // the history is sent back to the model.
 const STUDY_RE = /\n*<!--STUDY:([\s\S]*?)-->/
 
+const SRC_RE = /\n*<!--SRC:([\s\S]*?)-->/
+
 function splitStudy(content) {
-  const raw = content || ''
+  let raw = content || ''
+  let sources = []
+  const sm = raw.match(SRC_RE)
+  if (sm) {
+    try { sources = JSON.parse(decodeURIComponent(sm[1])) } catch (e) { sources = [] }
+    raw = raw.replace(SRC_RE, '')
+  }
   const m = raw.match(STUDY_RE)
-  if (!m) return { text: raw, deck: null }
+  if (!m) return { text: raw.trim(), deck: null, sources }
   let deck = null
   try { deck = JSON.parse(decodeURIComponent(m[1])) } catch (e) { deck = null }
-  return { text: raw.replace(STUDY_RE, '').trim(), deck }
+  return { text: raw.replace(STUDY_RE, '').trim(), deck, sources }
+}
+
+// Small site-logo chips shown under a reply that used web search results.
+function SourceChips({ sources, c }) {
+  const [failed, setFailed] = useState({})
+  const list = Array.isArray(sources) ? sources.filter((s) => s && s.u) : []
+  if (!list.length) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '0.5rem 0 0.1rem 0.2rem', flexWrap: 'wrap' }}>
+      <span style={{ fontSize: '0.7rem', color: c.subtext, fontWeight: 600, marginRight: '2px' }}>Sources</span>
+      {list.map((s, i) => {
+        let host = ''
+        try { host = new URL(s.u).hostname.replace(/^www\./, '') } catch (e) { host = '' }
+        return (
+          <a
+            key={i}
+            href={s.u}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={host || s.t}
+            aria-label={host || s.t}
+            style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: c.surfaceAlt, border: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', textDecoration: 'none', color: c.text, fontSize: '0.72rem', fontWeight: 700 }}
+          >
+            {failed[i] || !host ? (
+              (host[0] || '?').toUpperCase()
+            ) : (
+              <img src={`https://www.google.com/s2/favicons?domain=${host}&sz=64`} alt="" width="16" height="16" onError={() => setFailed((f) => ({ ...f, [i]: true }))} style={{ borderRadius: '4px', display: 'block' }} />
+            )}
+          </a>
+        )
+      })}
+    </div>
+  )
 }
 
 // Must match the limit enforced in api/generate.js (check_rate_limit call).
@@ -1362,7 +1403,7 @@ function StudyDeck({ deck, c }) {
 function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback, onShare, onExportPdf, onReply }) {
   const c = getPalette(theme, accentColor)
   const isUser = role === 'user'
-  const { text: displayText, deck } = isUser ? { text: content, deck: null } : splitStudy(content)
+  const { text: displayText, deck, sources } = isUser ? { text: content, deck: null, sources: [] } : splitStudy(content)
   // Only user messages get the custom long-press menu (copy/edit) — they have
   // no action buttons below them. AI replies already have copy/feedback
   // buttons right underneath, so long-pressing one falls through to normal
@@ -1399,7 +1440,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
             rehypePlugins={[rehypeKatex]}
             components={{
               blockquote: ({ node, ...rest }) => (
-                <blockquote {...rest} style={{ margin: '0 0 0.5rem 0', padding: '0.3rem 0.65rem', borderLeft: `3px solid ${isUser ? 'rgba(0,0,0,0.4)' : c.accent}`, backgroundColor: isUser ? 'rgba(0,0,0,0.1)' : c.bg, borderRadius: '6px', fontSize: '0.82rem', opacity: 0.92 }} />
+                <blockquote {...rest} className="reply-quote" style={{ margin: '0 0 0.55rem 0', padding: '0.45rem 0.7rem', borderLeft: `4px solid ${isUser ? 'rgba(255,255,255,0.75)' : c.accent}`, backgroundColor: isUser ? 'rgba(0,0,0,0.14)' : c.surfaceAlt, borderRadius: '10px', fontSize: '0.82rem', lineHeight: 1.4 }} />
               ),
               table: ({ node, ...rest }) => (
                 <div data-noswipe="true" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '0.5rem 0 0.8rem', borderRadius: '10px', border: `1px solid ${isUser ? 'rgba(0,0,0,0.2)' : c.border}` }}>
@@ -1485,6 +1526,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
         </div>
       </div>
       {!isUser && deck && <StudyDeck deck={deck} c={c} />}
+      {!isUser && sources.length > 0 && <SourceChips sources={sources} c={c} />}
       {!isUser && (
         <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.3rem', paddingLeft: '0.2rem' }}>
           <button type="button" onClick={() => onReply(role, displayText)} style={styles.msgFeedbackBtn} aria-label="Reply">
@@ -2603,7 +2645,7 @@ function Dashboard({ session }) {
       // A reply shows as a quote at the top of the message, and the AI is told
       // exactly which earlier message the student is answering.
       const quoteMd = replySnapshot
-        ? `> **${replySnapshot.role === 'user' ? 'You' : 'RADIUS'}:** ${replySnapshot.preview}\n\n`
+        ? `> **${replySnapshot.role === 'user' ? 'You' : 'RADIUS'}** ${replySnapshot.preview}\n\n`
         : ''
       const userContent = quoteMd + baseContent
       const textForModel = replySnapshot
@@ -2850,17 +2892,21 @@ function Dashboard({ session }) {
       )}
 
       {replyTo && (
-        <div style={{ margin: '0 1rem 0.4rem 1rem', padding: '0.45rem 0.7rem', borderRadius: '12px', border: `1px solid ${c.border}`, borderLeft: `4px solid ${c.accent}`, backgroundColor: c.surface, display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div className="reply-bar" style={{ margin: '0 1rem 0.5rem 1rem', padding: '0.6rem 0.6rem 0.6rem 0.8rem', borderRadius: '18px', border: `1px solid ${c.border}`, backgroundColor: c.surface, boxShadow: '0 10px 28px rgba(0,0,0,0.22)', display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+          <span style={{ alignSelf: 'stretch', width: '4px', borderRadius: '4px', backgroundColor: c.accent, backgroundImage: c.accentGrad, flexShrink: 0 }} />
+          <span style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: c.accentSoft, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <ReplyIcon color={c.accent} />
+          </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: '0.72rem', fontWeight: 'bold', color: c.accent, margin: 0 }}>
-              Replying to {replyTo.role === 'user' ? 'yourself' : 'RADIUS'}
+            <p style={{ fontSize: '0.74rem', fontWeight: 700, color: c.accent, margin: 0, letterSpacing: '0.01em' }}>
+              Replying to {replyTo.role === 'user' ? 'You' : 'RADIUS'}
             </p>
-            <p style={{ fontSize: '0.8rem', color: c.subtext, margin: '2px 0 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <p style={{ fontSize: '0.82rem', color: c.subtext, margin: '2px 0 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {replyTo.preview}
             </p>
           </div>
-          <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply" style={{ background: 'none', border: 'none', color: c.subtext, fontSize: '1rem', cursor: 'pointer', padding: '0.2rem 0.4rem' }}>
-            ✕
+          <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply" style={{ width: '30px', height: '30px', borderRadius: '50%', border: 'none', backgroundColor: c.surfaceAlt, color: c.subtext, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" /></svg>
           </button>
         </div>
       )}
