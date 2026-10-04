@@ -1,11 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+/* Border-box everywhere: without this, any element with width: 100% plus
+   padding becomes wider than the screen. That is what made the Settings page
+   open wider than the phone and cut off on the right. */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg, #0a0c12);
+  background-image: var(--bg-glow, none);
+  background-attachment: fixed;
+  color: var(--text, #eef1f8);
+}
+
+/* Headings use a sharper display font. */
+.radius-display {
+  font-family: 'Space Grotesk', 'Plus Jakarta Sans', system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+input, textarea, select, button {
+  font-family: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, filter 0.15s ease, box-shadow 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.96);
+  filter: brightness(1.08);
+}
+
+/* Selectors: solid, with a clean custom chevron instead of the browser arrow. */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238f98ae' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 15px center;
+  background-size: 14px;
+  padding-right: 42px !important;
+  cursor: pointer;
+}
+
+/* Clear accent-coloured focus ring on every field. */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent, #34d27b) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(52, 210, 123, 0.22));
+}
+
+/* The chat box sits inside a rounded bar that already shows focus. */
+.radius-app-shell textarea:focus {
+  box-shadow: none;
+}
+
+::selection {
+  background: var(--accent-soft, rgba(52, 210, 123, 0.3));
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(143, 152, 174, 0.35) transparent;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
 }
 
 body {
-  background-color: #0f0f0f;
-  color: #ffffff;
   overscroll-behavior-y: none;
 }
 
@@ -88,4 +165,199 @@ body {
 
 .radius-entrance {
   animation: radius-fade-scale 0.35s ease-out both;
+}
+
+/* ------------------------------------------------------------------ */
+/* 3D motion: hero scene, cube loader, card entrances                  */
+/* Pure CSS transforms (GPU friendly), no extra libraries.             */
+/* ------------------------------------------------------------------ */
+.r3d-scene {
+  position: relative;
+  width: 230px;
+  height: 230px;
+  perspective: 900px;
+  pointer-events: none;
+}
+
+.r3d-glow {
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-soft, rgba(52, 210, 123, 0.35)), transparent 68%);
+  animation: r3d-pulse 4s ease-in-out infinite;
+}
+
+.r3d-stage {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transition: transform 0.25s ease-out;
+}
+
+.r3d-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.07);
+  transform-style: preserve-3d;
+}
+
+.r3d-ring::after {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 14px 3px currentColor;
+}
+
+.r3d-ring-a {
+  width: 220px;
+  height: 220px;
+  margin: -110px 0 0 -110px;
+  color: var(--accent, #34d27b);
+  border-top-color: currentColor;
+  border-right-color: currentColor;
+  animation: r3d-spin-a 9s linear infinite;
+}
+
+.r3d-ring-b {
+  width: 180px;
+  height: 180px;
+  margin: -90px 0 0 -90px;
+  color: var(--accent2, #5eead4);
+  border-left-color: currentColor;
+  border-bottom-color: currentColor;
+  animation: r3d-spin-b 12s linear infinite reverse;
+}
+
+.r3d-ring-c {
+  width: 146px;
+  height: 146px;
+  margin: -73px 0 0 -73px;
+  color: #a877f7;
+  border-top-color: currentColor;
+  animation: r3d-spin-c 15s linear infinite;
+}
+
+.r3d-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 104px;
+  height: 104px;
+  margin: -52px 0 0 -52px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: #0a0c12;
+  box-shadow: 0 22px 50px var(--accent-soft, rgba(52, 210, 123, 0.4)), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  animation: r3d-float 5s ease-in-out infinite;
+}
+
+.r3d-core img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.r3d-dot {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--accent, #34d27b);
+  box-shadow: 0 0 10px var(--accent, #34d27b);
+  opacity: 0.8;
+  animation: r3d-drift 6s ease-in-out infinite;
+}
+
+@keyframes r3d-spin-a {
+  from { transform: rotateX(72deg) rotateZ(0deg); }
+  to   { transform: rotateX(72deg) rotateZ(360deg); }
+}
+
+@keyframes r3d-spin-b {
+  from { transform: rotateY(70deg) rotateZ(0deg); }
+  to   { transform: rotateY(70deg) rotateZ(360deg); }
+}
+
+@keyframes r3d-spin-c {
+  from { transform: rotateX(38deg) rotateY(38deg) rotateZ(0deg); }
+  to   { transform: rotateX(38deg) rotateY(38deg) rotateZ(360deg); }
+}
+
+@keyframes r3d-float {
+  0%, 100% { transform: translateZ(30px) translateY(0) rotateY(-12deg) rotateX(5deg); }
+  50%      { transform: translateZ(46px) translateY(-9px) rotateY(12deg) rotateX(-5deg); }
+}
+
+@keyframes r3d-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.92); }
+  50%      { opacity: 1; transform: scale(1.06); }
+}
+
+@keyframes r3d-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(6px, -14px, 40px); }
+}
+
+/* Small spinning cube used as the "thinking" loader. */
+.cube3d-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cube3d {
+  --s: 22px;
+  position: relative;
+  width: var(--s);
+  height: var(--s);
+  transform-style: preserve-3d;
+  animation: cube-spin 2.4s linear infinite;
+}
+
+.cube3d i {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--accent, #34d27b);
+  border-radius: 3px;
+  background: var(--accent-soft, rgba(52, 210, 123, 0.22));
+  box-shadow: inset 0 0 8px var(--accent-soft, rgba(52, 210, 123, 0.3));
+}
+
+.cube3d .cf-front  { transform: translateZ(calc(var(--s) / 2)); }
+.cube3d .cf-back   { transform: rotateY(180deg) translateZ(calc(var(--s) / 2)); }
+.cube3d .cf-right  { transform: rotateY(90deg) translateZ(calc(var(--s) / 2)); }
+.cube3d .cf-left   { transform: rotateY(-90deg) translateZ(calc(var(--s) / 2)); }
+.cube3d .cf-top    { transform: rotateX(90deg) translateZ(calc(var(--s) / 2)); }
+.cube3d .cf-bottom { transform: rotateX(-90deg) translateZ(calc(var(--s) / 2)); }
+
+@keyframes cube-spin {
+  from { transform: rotateX(-24deg) rotateY(0deg); }
+  to   { transform: rotateX(-24deg) rotateY(360deg); }
+}
+
+/* Cards tilt up into view, and lean slightly when pressed. */
+.card3d-in {
+  animation: card3d-in 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  transform-origin: 50% 100%;
+}
+
+@keyframes card3d-in {
+  from { opacity: 0; transform: perspective(700px) rotateX(-32deg) translateY(26px); }
+  to   { opacity: 1; transform: perspective(700px) rotateX(0deg) translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .r3d-ring, .r3d-core, .r3d-glow, .r3d-dot, .cube3d, .card3d-in, .r3d-stage {
+    animation: none !important;
+    transition: none !important;
+  }
 }
