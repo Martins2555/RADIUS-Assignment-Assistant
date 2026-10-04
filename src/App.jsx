@@ -1005,6 +1005,70 @@ function useLongPress(onLongPress, ms = 480) {
 
 const noSelectStyle = { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }
 
+function ReplyIcon({ color }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M9 7L4 12l5 5" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 12h9a7 7 0 0 1 7 7v1" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// Swipe a message bubble to the right to reply to it (like WhatsApp/Telegram).
+// Only reacts to a mostly-horizontal rightward drag, so normal scrolling and
+// tables that scroll sideways (marked data-noswipe) are left alone.
+const SWIPE_TRIGGER = 56
+function useSwipeReply(onReply) {
+  const [dx, setDx] = useState(0)
+  const startRef = useRef(null)
+  const lockRef = useRef(null)
+  const firedRef = useRef(false)
+
+  const reset = () => {
+    startRef.current = null
+    lockRef.current = null
+    firedRef.current = false
+    setDx(0)
+  }
+
+  const onTouchStart = (e) => {
+    if (e.target && e.target.closest && e.target.closest('[data-noswipe]')) {
+      startRef.current = null
+      return
+    }
+    const t = e.touches[0]
+    startRef.current = { x: t.clientX, y: t.clientY }
+    lockRef.current = null
+    firedRef.current = false
+  }
+
+  const onTouchMove = (e) => {
+    const start = startRef.current
+    if (!start) return
+    const t = e.touches[0]
+    const ddx = t.clientX - start.x
+    const ddy = t.clientY - start.y
+    if (lockRef.current === null && (Math.abs(ddx) > 10 || Math.abs(ddy) > 10)) {
+      lockRef.current = ddx > 0 && Math.abs(ddx) > Math.abs(ddy) * 1.4 ? 'h' : 'v'
+    }
+    if (lockRef.current === 'h') {
+      const next = Math.min(ddx, 80)
+      setDx(next)
+      if (next >= SWIPE_TRIGGER && !firedRef.current) {
+        firedRef.current = true
+        try { navigator.vibrate?.(12) } catch (err) { /* ignore */ }
+      }
+    }
+  }
+
+  const onTouchEnd = () => {
+    if (lockRef.current === 'h' && firedRef.current) onReply()
+    reset()
+  }
+
+  return { dx, handlers: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: reset } }
+}
+
 // Study Pack replies carry their flashcards/quiz as a hidden marker at the end
 // of the message text. It is stripped before display, copy, share and before
 // the history is sent back to the model.
@@ -1079,7 +1143,7 @@ function StudyDeck({ deck, c }) {
   const restartQuiz = () => { setQi(0); setPicked(null); setScore(0); setDone(false) }
 
   return (
-    <div style={{ width: '100%', maxWidth: '420px', margin: '0.6rem 0 0.4rem', padding: '0.8rem', borderRadius: '16px', border: `1px solid ${c.border}`, backgroundColor: c.surface, color: c.text }}>
+    <div data-noswipe="true" style={{ width: '100%', maxWidth: '420px', margin: '0.6rem 0 0.4rem', padding: '0.8rem', borderRadius: '16px', border: `1px solid ${c.border}`, backgroundColor: c.surface, color: c.text }}>
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.7rem' }}>
         {cards.length > 0 && tabBtn('cards', `Flashcards (${cards.length})`)}
         {quiz.length > 0 && tabBtn('quiz', `Quiz (${quiz.length})`)}
@@ -1148,7 +1212,7 @@ function StudyDeck({ deck, c }) {
   )
 }
 
-function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback, onShare, onExportPdf }) {
+function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback, onShare, onExportPdf, onReply }) {
   const c = getPalette(theme, accentColor)
   const isUser = role === 'user'
   const { text: displayText, deck } = isUser ? { text: content, deck: null } : splitStudy(content)
@@ -1160,12 +1224,20 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
   // offering a whole-bubble copy.
   const longPress = useLongPress((x, y) => onLongPress(x, y, { id, role, content }))
   const pressHandlers = isUser ? longPress : {}
+  const swipe = useSwipeReply(() => onReply(role, displayText))
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.35rem' }}>
+    <div {...swipe.handlers} style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: '0.35rem' }}>
+      {swipe.dx > 8 && (
+        <div style={{ position: 'absolute', left: '6px', top: '14px', width: '30px', height: '30px', borderRadius: '50%', backgroundColor: c.surface, border: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: Math.min(1, swipe.dx / SWIPE_TRIGGER), transform: `scale(${swipe.dx >= SWIPE_TRIGGER ? 1.1 : 0.85})` }}>
+          <ReplyIcon color={c.text} />
+        </div>
+      )}
       <div
         {...pressHandlers}
         style={{
+          transform: swipe.dx ? `translateX(${swipe.dx}px)` : 'none',
+          transition: swipe.dx ? 'none' : 'transform 0.18s ease',
           maxWidth: '85%',
           padding: '0.7rem 1rem',
           borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
@@ -1180,8 +1252,11 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
             remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
             rehypePlugins={[rehypeKatex]}
             components={{
+              blockquote: ({ node, ...rest }) => (
+                <blockquote {...rest} style={{ margin: '0 0 0.5rem 0', padding: '0.3rem 0.65rem', borderLeft: `3px solid ${isUser ? 'rgba(0,0,0,0.4)' : c.accent}`, backgroundColor: isUser ? 'rgba(0,0,0,0.1)' : c.bg, borderRadius: '6px', fontSize: '0.82rem', opacity: 0.92 }} />
+              ),
               table: ({ node, ...rest }) => (
-                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '0.5rem 0 0.8rem', borderRadius: '10px', border: `1px solid ${isUser ? 'rgba(0,0,0,0.2)' : c.border}` }}>
+                <div data-noswipe="true" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '0.5rem 0 0.8rem', borderRadius: '10px', border: `1px solid ${isUser ? 'rgba(0,0,0,0.2)' : c.border}` }}>
                   <table {...rest} style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem' }} />
                 </div>
               ),
@@ -1266,6 +1341,9 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
       {!isUser && deck && <StudyDeck deck={deck} c={c} />}
       {!isUser && (
         <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.3rem', paddingLeft: '0.2rem' }}>
+          <button type="button" onClick={() => onReply(role, displayText)} style={styles.msgFeedbackBtn} aria-label="Reply">
+            <ReplyIcon color={c.subtext} />
+          </button>
           <button type="button" onClick={() => onCopy(displayText)} style={styles.msgFeedbackBtn} aria-label="Copy">
             <CopyIcon color={c.subtext} />
           </button>
@@ -1297,17 +1375,24 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
   )
 }
 
-function LongPressMenu({ menu, onClose, theme, accentColor, onCopy, onEdit }) {
+function LongPressMenu({ menu, onClose, theme, accentColor, onCopy, onEdit, onReply }) {
   const c = getPalette(theme, accentColor)
   if (!menu) return null
   const isUser = menu.role === 'user'
-  const top = typeof window !== 'undefined' ? Math.min(menu.y, window.innerHeight - 110) : menu.y
+  const top = typeof window !== 'undefined' ? Math.min(menu.y, window.innerHeight - 170) : menu.y
   const left = typeof window !== 'undefined' ? Math.min(menu.x, window.innerWidth - 170) : menu.x
 
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 65 }} />
       <div style={{ ...styles.attachMenu, position: 'fixed', top, left, zIndex: 70, backgroundColor: c.surface, borderColor: c.border }}>
+        <button
+          type="button"
+          style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          onClick={() => { onReply(menu.role, splitStudy(menu.content).text); onClose() }}
+        >
+          <ReplyIcon color={c.text} /> Reply
+        </button>
         <button
           type="button"
           style={{ ...styles.attachMenuItem, color: c.text, background: 'none', border: 'none', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
@@ -1683,6 +1768,7 @@ function Dashboard({ session }) {
   const [mode, setMode] = useState('calculative')
   const [tool, setTool] = useState('chat')
   const [usedThisHour, setUsedThisHour] = useState(null)
+  const [replyTo, setReplyTo] = useState(null)
   const [subject, setSubject] = useState('')
   const [assignmentText, setAssignmentText] = useState('')
   const [attachedFiles, setAttachedFiles] = useState([])
@@ -1807,6 +1893,25 @@ function Dashboard({ session }) {
     } catch (e) {
       // best-effort only
     }
+  }
+
+  // Start replying to a message: shows a quote bar above the input. The quote
+  // is saved at the top of the sent message and also given to the AI as context.
+  function startReply(role, content) {
+    const clean = splitStudy(content || '').text
+      .replace(/^>.*$/gm, '')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '[image]')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/[*_`#>|]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!clean) return
+    setReplyTo({
+      role,
+      preview: clean.length > 120 ? clean.slice(0, 120).trimEnd() + '...' : clean,
+      full: clean.slice(0, 800),
+    })
+    requestAnimationFrame(() => textAreaRef.current?.focus())
   }
 
   function handleEditMessage(text) {
@@ -1978,6 +2083,7 @@ function Dashboard({ session }) {
     setActiveConversationId(conv.id)
     setMode(conv.mode || 'calculative')
     setTool('chat')
+    setReplyTo(null)
     setSubject(conv.subject || '')
     setError('')
     const { data, error } = await supabase
@@ -1989,6 +2095,7 @@ function Dashboard({ session }) {
   }
 
   function handleNewChat() {
+    setReplyTo(null)
     setActiveConversationId(null)
     setMessages([])
     setAssignmentText('')
@@ -2263,6 +2370,8 @@ function Dashboard({ session }) {
 
     const userText = assignmentText
     const filesToSend = attachedFiles
+    const replySnapshot = replyTo
+    setReplyTo(null)
     setAssignmentText('')
     setAttachedFiles([])
     if (textAreaRef.current) textAreaRef.current.style.height = 'auto'
@@ -2328,8 +2437,17 @@ function Dashboard({ session }) {
 
       // Joined with a single space (not a blank-line paragraph break) so multiple
       // attachments render inline together in one row instead of stacking full-width.
-      const userContent = attachmentMarkdownParts.length
+      const baseContent = attachmentMarkdownParts.length
         ? `${attachmentMarkdownParts.join(' ')}${userText ? '\n\n' + userText : ''}`
+        : userText
+      // A reply shows as a quote at the top of the message, and the AI is told
+      // exactly which earlier message the student is answering.
+      const quoteMd = replySnapshot
+        ? `> **${replySnapshot.role === 'user' ? 'You' : 'RADIUS'}:** ${replySnapshot.preview}\n\n`
+        : ''
+      const userContent = quoteMd + baseContent
+      const textForModel = replySnapshot
+        ? `[The student is replying to this earlier ${replySnapshot.role === 'user' ? 'message of their own' : 'reply from RADIUS'}: "${replySnapshot.full}"]\n\n${userText}`
         : userText
 
       setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
@@ -2338,12 +2456,13 @@ function Dashboard({ session }) {
 
       const history = messages.map((m) => ({ role: m.role, content: splitStudy(m.content).text }))
 
-      await requestReply({ conversationId, userText, filesForApi, history })
+      await requestReply({ conversationId, userText: textForModel, filesForApi, history })
     } catch (err) {
       // Something failed before the question was sent (creating the chat or
       // uploading a file). Put the text back so nothing the student typed is lost.
       if (err.name !== 'AbortError') {
         setAssignmentText(userText)
+        setReplyTo(replySnapshot)
         setError(err.message || 'Network error. Please try again.')
       }
     }
@@ -2408,6 +2527,7 @@ function Dashboard({ session }) {
         accentColor={accentColor}
         onCopy={handleCopyText}
         onEdit={handleEditMessage}
+        onReply={startReply}
       />
 
       {showNicknamePrompt && (
@@ -2480,6 +2600,7 @@ function Dashboard({ session }) {
               onShare={handleShareText}
               onExportPdf={handleExportPdf}
               onFeedback={handleSetFeedback}
+              onReply={startReply}
             />
             {!loading && i === messages.length - 1 && m.role === 'assistant' && m.responseType === 'assignment' && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', margin: '0.5rem 0 0.8rem' }}>
@@ -2562,6 +2683,22 @@ function Dashboard({ session }) {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {replyTo && (
+        <div style={{ margin: '0 1rem 0.4rem 1rem', padding: '0.45rem 0.7rem', borderRadius: '12px', border: `1px solid ${c.border}`, borderLeft: `4px solid ${c.accent}`, backgroundColor: c.surface, display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: '0.72rem', fontWeight: 'bold', color: c.accent, margin: 0 }}>
+              Replying to {replyTo.role === 'user' ? 'yourself' : 'RADIUS'}
+            </p>
+            <p style={{ fontSize: '0.8rem', color: c.subtext, margin: '2px 0 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {replyTo.preview}
+            </p>
+          </div>
+          <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply" style={{ background: 'none', border: 'none', color: c.subtext, fontSize: '1rem', cursor: 'pointer', padding: '0.2rem 0.4rem' }}>
+            ✕
+          </button>
         </div>
       )}
 
