@@ -55,14 +55,22 @@ self.addEventListener('push', (event) => {
   }
   const title = data.title || 'RADIUS'
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || '',
-      icon: '/logo.png',
-      badge: '/logo.png',
-      tag: data.tag || 'radius',
-      renotify: true,
-      data: { url: data.url || '/' },
-    })
+    (async () => {
+      // If RADIUS is open and on screen, the person is already looking at it,
+      // so skip the notification (answers are shown in the app itself).
+      if (data.tag === 'radius-reply') {
+        const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        if (open.some((c) => c.visibilityState === 'visible')) return
+      }
+      await self.registration.showNotification(title, {
+        body: data.body || '',
+        icon: '/logo.png',
+        badge: '/logo.png',
+        tag: data.tag || 'radius',
+        renotify: true,
+        data: { url: data.url || '/' },
+      })
+    })()
   )
 })
 
