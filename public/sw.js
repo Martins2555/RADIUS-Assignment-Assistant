@@ -43,3 +43,43 @@ self.addEventListener('fetch', (event) => {
     })()
   )
 })
+
+// ---- Push notifications -----------------------------------------------------
+// The server sends a small JSON payload: { title, body, tag, url }.
+self.addEventListener('push', (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch (e) {
+    data = { title: 'RADIUS', body: event.data ? event.data.text() : '' }
+  }
+  const title = data.title || 'RADIUS'
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || '',
+      icon: '/logo.png',
+      badge: '/logo.png',
+      tag: data.tag || 'radius',
+      renotify: true,
+      data: { url: data.url || '/' },
+    })
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data && event.notification.data.url) || '/'
+  event.waitUntil(
+    (async () => {
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      for (const client of all) {
+        if ('focus' in client) {
+          await client.focus()
+          client.postMessage({ type: 'radius-open', url })
+          return
+        }
+      }
+      if (self.clients.openWindow) await self.clients.openWindow(url)
+    })()
+  )
+})
