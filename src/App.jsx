@@ -85,7 +85,7 @@ function InstallCard({ c }) {
         <button
           type="button"
           onClick={install}
-          style={{ padding: '0.65rem 1rem', borderRadius: '10px', border: 'none', backgroundColor: c.accent, color: c.accentText, fontWeight: 'bold', fontSize: '0.88rem', cursor: 'pointer' }}
+          style={{ padding: '0.65rem 1rem', borderRadius: '10px', border: 'none', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold', fontSize: '0.88rem', cursor: 'pointer' }}
         >
           Install RADIUS
         </button>
@@ -271,16 +271,25 @@ function FlameIcon({ color }) {
   )
 }
 
-// Free color choices for the chat accent. Kept simple and all-unlocked for now —
-// this is where a "premium" lock would slot in later once payment is wired up.
+// Chat accent colours. Each has a main shade and a slightly deeper second
+// shade (used for the soft gradient on buttons and bubbles), for dark and
+// light mode, plus the text colour that reads best on top of it.
+// All unlocked for now; this is where a premium lock would slot in later.
 const accentColors = {
-  green: { dark: '#22c55e', light: '#16a34a' },
-  blue: { dark: '#3b82f6', light: '#2563eb' },
-  purple: { dark: '#a855f7', light: '#9333ea' },
-  pink: { dark: '#ec4899', light: '#db2777' },
-  orange: { dark: '#f97316', light: '#ea580c' },
+  green:   { dark: '#34d27b', dark2: '#1fb862', light: '#16a34a', light2: '#12853b', onDark: '#052412', onLight: '#ffffff', label: 'Emerald' },
+  blue:    { dark: '#5b9bff', dark2: '#3a7cf5', light: '#2563eb', light2: '#1d4fd8', onDark: '#ffffff', onLight: '#ffffff', label: 'Ocean' },
+  purple:  { dark: '#a877f7', dark2: '#8b4fe6', light: '#9333ea', light2: '#7a24cc', onDark: '#ffffff', onLight: '#ffffff', label: 'Violet' },
+  pink:    { dark: '#f45fa8', dark2: '#e03c8d', light: '#db2777', light2: '#bf1d65', onDark: '#ffffff', onLight: '#ffffff', label: 'Rose' },
+  orange:  { dark: '#fb923c', dark2: '#f97316', light: '#ea580c', light2: '#cf4a09', onDark: '#1c0b01', onLight: '#ffffff', label: 'Sunset' },
+  teal:    { dark: '#2dd4bf', dark2: '#14b8a6', light: '#0d9488', light2: '#0b7a70', onDark: '#022b27', onLight: '#ffffff', label: 'Teal' },
+  cyan:    { dark: '#38d4f5', dark2: '#1fb6e0', light: '#0891b2', light2: '#0a7893', onDark: '#03242d', onLight: '#ffffff', label: 'Cyan' },
+  indigo:  { dark: '#7c83fd', dark2: '#5b63f0', light: '#4f46e5', light2: '#4038c7', onDark: '#ffffff', onLight: '#ffffff', label: 'Indigo' },
+  red:     { dark: '#f5636b', dark2: '#e63946', light: '#dc2626', light2: '#b91c1c', onDark: '#ffffff', onLight: '#ffffff', label: 'Crimson' },
+  amber:   { dark: '#fbbf24', dark2: '#f59e0b', light: '#d97706', light2: '#b45309', onDark: '#2b1700', onLight: '#ffffff', label: 'Amber' },
+  lime:    { dark: '#a3e635', dark2: '#84cc16', light: '#65a30d', light2: '#4d7c0f', onDark: '#122004', onLight: '#ffffff', label: 'Lime' },
+  magenta: { dark: '#e879f9', dark2: '#d946ef', light: '#c026d3', light2: '#a21caf', onDark: '#2b0530', onLight: '#ffffff', label: 'Orchid' },
 }
-const accentOrder = ['green', 'blue', 'purple', 'pink', 'orange']
+const accentOrder = ['green', 'blue', 'purple', 'pink', 'orange', 'teal', 'cyan', 'indigo', 'red', 'amber', 'lime', 'magenta']
 
 // Quick follow-up actions shown after an assignment-type reply.
 const STUDY_ACTIONS = [
@@ -313,23 +322,120 @@ const SUBJECTS = [
 ]
 
 const modeBase = {
-  dark: { bg: '#0f0f0f', surface: '#1a1a1a', border: '#333', text: '#ffffff', subtext: '#888' },
-  light: { bg: '#ffffff', surface: '#f0f0f0', border: '#ddd', text: '#111111', subtext: '#666' },
+  dark: { bg: '#0a0c12', surface: '#121622', surfaceAlt: '#1a2030', border: '#262d42', text: '#eef1f8', subtext: '#8f98ae' },
+  light: { bg: '#f3f5fa', surface: '#ffffff', surfaceAlt: '#eaeef6', border: '#dde2ee', text: '#0f1320', subtext: '#586179' },
+}
+
+function hexToRgba(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
 
 function getPalette(theme, accentColor) {
   const base = modeBase[theme] || modeBase.dark
   const ac = accentColors[accentColor] || accentColors.green
+  const light = theme === 'light'
+  const a1 = light ? ac.light : ac.dark
+  const a2 = light ? ac.light2 : ac.dark2
   return {
     ...base,
-    accent: ac[theme] || ac.dark,
-    accentText: theme === 'light' ? '#ffffff' : '#000000',
+    accent: a1,
+    accent2: a2,
+    accentGrad: `linear-gradient(135deg, ${a1}, ${a2})`,
+    accentText: light ? ac.onLight : ac.onDark,
+    accentSoft: hexToRgba(a1, light ? 0.16 : 0.22),
+    accentGlow: hexToRgba(a1, light ? 0.28 : 0.34),
+    bgGlow: `radial-gradient(900px 480px at 100% -5%, ${hexToRgba(a1, light ? 0.1 : 0.13)}, transparent 62%), radial-gradient(700px 420px at -10% 105%, ${hexToRgba(a2, light ? 0.07 : 0.09)}, transparent 62%)`,
   }
 }
 
-function Logo({ small }) {
+const HERO_PARTICLES = [
+  { left: '8%', top: '30%', size: 5, delay: '0s' },
+  { left: '88%', top: '24%', size: 4, delay: '1.2s' },
+  { left: '16%', top: '78%', size: 6, delay: '2.1s' },
+  { left: '82%', top: '74%', size: 5, delay: '0.6s' },
+  { left: '50%', top: '4%', size: 4, delay: '1.8s' },
+  { left: '60%', top: '94%', size: 4, delay: '2.6s' },
+  { left: '30%', top: '10%', size: 3, delay: '3.1s' },
+]
+
+// 3D hero: orbiting rings around the floating logo. The whole scene tilts
+// with your finger or mouse, and with the phone itself on Android.
+function Hero3D({ size = 230 }) {
+  const stageRef = useRef(null)
+
+  useEffect(() => {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
+    const el = stageRef.current
+    if (!el) return undefined
+    let raf = 0
+    const apply = (rx, ry) => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        el.style.setProperty('--tilt-x', `${rx}deg`)
+        el.style.setProperty('--tilt-y', `${ry}deg`)
+      })
+    }
+    const onPointer = (e) => {
+      const nx = e.clientX / window.innerWidth - 0.5
+      const ny = e.clientY / window.innerHeight - 0.5
+      apply(-ny * 26, nx * 34)
+    }
+    const onOrient = (e) => {
+      if (e.gamma == null) return
+      const ry = Math.max(-25, Math.min(25, e.gamma)) * 0.9
+      const rx = Math.max(-25, Math.min(25, (e.beta || 45) - 45)) * -0.9
+      apply(rx, ry)
+    }
+    window.addEventListener('pointermove', onPointer, { passive: true })
+    window.addEventListener('deviceorientation', onOrient, { passive: true })
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('pointermove', onPointer)
+      window.removeEventListener('deviceorientation', onOrient)
+    }
+  }, [])
+
   return (
-    <div className={small ? '' : 'fade-in-1 logo-pulse'} style={small ? styles.logoWrapperSmall : styles.logoWrapper}>
+    <div style={{ width: size, height: size, flexShrink: 0 }}>
+      <div className="r3d-scene" style={{ transform: `scale(${size / 230})`, transformOrigin: 'top left' }}>
+        <div className="r3d-glow" />
+        <div className="r3d-stage" ref={stageRef}>
+          <span className="r3d-ring r3d-ring-a" />
+          <span className="r3d-ring r3d-ring-b" />
+          <span className="r3d-ring r3d-ring-c" />
+          {HERO_PARTICLES.map((d, i) => (
+            <span key={i} className="r3d-dot" style={{ left: d.left, top: d.top, width: d.size, height: d.size, animationDelay: d.delay }} />
+          ))}
+          <div className="r3d-core">
+            <img src="/logo.png" alt="RADIUS" />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Small spinning 3D cube, used as the loading indicator.
+function Cube3D({ size = 20 }) {
+  return (
+    <span className="cube3d-wrap" style={{ width: size + 10, height: size + 10, perspective: `${size * 7}px` }}>
+      <span className="cube3d" style={{ '--s': `${size}px` }}>
+        <i className="cf-front" />
+        <i className="cf-back" />
+        <i className="cf-right" />
+        <i className="cf-left" />
+        <i className="cf-top" />
+        <i className="cf-bottom" />
+      </span>
+    </span>
+  )
+}
+
+function Logo({ small }) {
+  if (!small) return <Hero3D />
+  return (
+    <div style={styles.logoWrapperSmall}>
       <img src="/logo.png" alt="RADIUS" style={styles.logo} />
     </div>
   )
@@ -491,8 +597,8 @@ function LandingScreen({ onGetStarted, onSignIn }) {
       </div>
 
       <div style={{ marginTop: '2.5rem', width: '100%', maxWidth: '360px', textAlign: 'left' }}>
-        {points.map((p) => (
-          <div key={p.title} style={{ border: '1px solid #333', borderRadius: '12px', padding: '1rem', marginBottom: '0.8rem' }}>
+        {points.map((p, i) => (
+          <div key={p.title} className="card3d-in" style={{ border: '1px solid #262d42', borderRadius: '16px', padding: '1rem', marginBottom: '0.8rem', backgroundColor: '#121622', boxShadow: '0 10px 26px rgba(0,0,0,0.25)', animationDelay: `${0.35 + i * 0.15}s` }}>
             <p style={{ fontWeight: 'bold', margin: '0 0 0.3rem' }}>{p.title}</p>
             <p style={{ color: '#aaa', fontSize: '0.85rem', margin: 0, lineHeight: '1.5' }}>{p.body}</p>
           </div>
@@ -511,7 +617,7 @@ function AboutScreen({ theme, accentColor, onBack }) {
     { title: 'Your work stays yours', body: 'Signed-in students get private history and uploads that only they can see.' },
   ]
   return (
-    <div style={{ ...styles.settingsContainer, backgroundColor: c.bg, color: c.text }}>
+    <div style={{ ...styles.settingsContainer, backgroundColor: c.bg, backgroundImage: c.bgGlow, color: c.text }}>
       <div style={styles.topBar}>
         <button onClick={onBack} style={styles.iconBtn}><BackIcon color={c.text} /></button>
         <span style={{ fontWeight: 'bold' }}>About</span>
@@ -591,7 +697,7 @@ function NicknamePrompt({ theme, accentColor, onSave, onSkip }) {
           </button>
           <button
             onClick={() => value.trim() && onSave(value.trim())}
-            style={{ flex: 1, padding: '0.7rem', borderRadius: '10px', border: 'none', backgroundColor: c.accent, color: c.accentText, fontWeight: 'bold', cursor: 'pointer', fontSize: '0.9rem' }}
+            style={{ flex: 1, padding: '0.7rem', borderRadius: '10px', border: 'none', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold', cursor: 'pointer', fontSize: '0.9rem' }}
           >
             Save
           </button>
@@ -608,10 +714,10 @@ function SettingsScreen({ session, theme, themePreference, setThemePreference, a
   }
 
   return (
-    <div style={{ ...styles.settingsContainer, backgroundColor: c.bg, color: c.text }}>
+    <div style={{ ...styles.settingsContainer, backgroundColor: c.bg, backgroundImage: c.bgGlow, color: c.text }}>
       <div style={styles.topBar}>
         <button onClick={onBack} style={styles.iconBtn}><BackIcon color={c.text} /></button>
-        <span style={{ fontWeight: 'bold' }}>Settings</span>
+        <span className="radius-display" style={{ fontWeight: 700, fontSize: '1.1rem' }}>Settings</span>
         <div style={{ width: '22px' }} />
       </div>
 
@@ -639,7 +745,7 @@ function SettingsScreen({ session, theme, themePreference, setThemePreference, a
 
 function SettingsCard({ c, children, style }) {
   return (
-    <div style={{ backgroundColor: c.surface, border: `1px solid ${c.border}`, borderRadius: '16px', padding: '1.2rem', marginBottom: '1rem', ...style }}>
+    <div style={{ backgroundColor: c.surface, border: `1px solid ${c.border}`, borderRadius: '20px', padding: '1.2rem', marginBottom: '1rem', boxShadow: '0 8px 24px rgba(0,0,0,0.14)', ...style }}>
       {children}
     </div>
   )
@@ -678,7 +784,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
               height: '64px',
               borderRadius: '50%',
               backgroundColor: c.accent,
-              backgroundImage: profile?.avatar_url ? `url(${profile.avatar_url})` : 'none',
+              backgroundImage: profile?.avatar_url ? `url(${profile.avatar_url})` : c.accentGrad,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
               display: 'flex',
@@ -736,7 +842,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
             {nicknameChanged && (
               <button
                 onClick={() => onSaveNickname(nicknameDraft.trim())}
-                style={{ padding: '0.5rem 0.8rem', borderRadius: '8px', border: 'none', backgroundColor: c.accent, color: c.accentText, fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer' }}
+                style={{ padding: '0.5rem 0.8rem', borderRadius: '8px', border: 'none', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer' }}
               >
                 Save
               </button>
@@ -764,7 +870,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
       {/* Appearance */}
       <SettingsCard c={c}>
         <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '0 0 0.7rem' }}>APPEARANCE</p>
-        <div style={{ display: 'flex', backgroundColor: c.bg, borderRadius: '12px', padding: '4px', border: `1px solid ${c.border}` }}>
+        <div style={{ display: 'flex', backgroundColor: c.surfaceAlt, borderRadius: '14px', padding: '4px', border: `1px solid ${c.border}` }}>
           {[
             { key: 'dark', label: '🌙 Dark' },
             { key: 'light', label: '☀️ Light' },
@@ -776,11 +882,11 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
               style={{
                 flex: 1,
                 padding: '0.6rem 0',
-                borderRadius: '9px',
+                borderRadius: '11px',
                 border: 'none',
-                backgroundColor: themePreference === opt.key ? c.accent : 'transparent',
+                backgroundColor: themePreference === opt.key ? c.accent : 'transparent', backgroundImage: themePreference === opt.key ? c.accentGrad : 'none',
                 color: themePreference === opt.key ? c.accentText : c.subtext,
-                fontWeight: themePreference === opt.key ? 'bold' : 'normal',
+                fontWeight: themePreference === opt.key ? 700 : 500,
                 fontSize: '0.82rem',
                 cursor: 'pointer',
                 transition: 'background-color 0.15s',
@@ -795,7 +901,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         <select
           value={profile?.response_style || 'balanced'}
           onChange={(e) => onSavePreference('response_style', e.target.value)}
-          style={{ width: '100%', padding: '0.7rem 0.8rem', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.bg, color: c.text, fontSize: '0.88rem' }}
+          style={{ width: '100%', padding: '0.8rem 0.95rem', borderRadius: '14px', border: `1.5px solid ${c.border}`, backgroundColor: c.surfaceAlt, color: c.text, fontSize: '0.9rem', fontWeight: 600 }}
         >
           {RESPONSE_STYLES.map((s) => (
             <option key={s.value} value={s.value}>{s.label}</option>
@@ -806,7 +912,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         <select
           value={profile?.preferred_subject || 'auto'}
           onChange={(e) => onSavePreference('preferred_subject', e.target.value)}
-          style={{ width: '100%', padding: '0.7rem 0.8rem', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.bg, color: c.text, fontSize: '0.88rem' }}
+          style={{ width: '100%', padding: '0.8rem 0.95rem', borderRadius: '14px', border: `1.5px solid ${c.border}`, backgroundColor: c.surfaceAlt, color: c.text, fontSize: '0.9rem', fontWeight: 600 }}
         >
           {SUBJECTS.map((s) => (
             <option key={s.value} value={s.value}>{s.label}</option>
@@ -814,12 +920,13 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         </select>
 
         <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '1.3rem 0 0.7rem' }}>CHAT COLOR</p>
-        <div style={{ display: 'flex', gap: '0.7rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem' }}>
           {accentOrder.map((key) => (
             <button
               key={key}
               onClick={() => setAccentColor(key)}
-              aria-label={key}
+              aria-label={accentColors[key].label}
+              title={accentColors[key].label}
               style={{
                 width: '34px',
                 height: '34px',
@@ -833,11 +940,11 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
                 justifyContent: 'center',
               }}
             >
-              <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: accentColors[key][theme] || accentColors[key].dark, display: 'block' }} />
+              <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundImage: `linear-gradient(135deg, ${accentColors[key][theme] || accentColors[key].dark}, ${accentColors[key][theme === 'light' ? 'light2' : 'dark2']})`, boxShadow: `0 3px 10px ${hexToRgba(accentColors[key][theme] || accentColors[key].dark, 0.45)}`, display: 'block' }} />
             </button>
           ))}
         </div>
-        <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.7rem' }}>More colors and custom backgrounds are coming with premium.</p>
+        <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.7rem' }}>Custom backgrounds are coming with premium.</p>
       </SettingsCard>
 
       {/* Messaging */}
@@ -1149,7 +1256,7 @@ function StudyDeck({ deck, c }) {
     <button
       type="button"
       onClick={() => setTab(id)}
-      style={{ ...styles.chipBtn, borderColor: c.border, backgroundColor: tab === id ? c.accent : 'transparent', color: tab === id ? c.accentText : c.text }}
+      style={{ ...styles.chipBtn, borderColor: c.border, backgroundColor: tab === id ? c.accent : 'transparent', backgroundImage: tab === id ? c.accentGrad : 'none', color: tab === id ? c.accentText : c.text }}
     >
       {label}
     </button>
@@ -1192,7 +1299,7 @@ function StudyDeck({ deck, c }) {
                 <span style={{ fontSize: '0.7rem', opacity: 0.7, marginBottom: '0.5rem' }}>QUESTION (tap to flip)</span>
                 <span style={{ fontSize: '1rem', lineHeight: 1.5 }}>{cards[ci].q}</span>
               </div>
-              <div style={{ gridArea: '1 / 1', minHeight: '150px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '1rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.accent, color: c.accentText, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+              <div style={{ gridArea: '1 / 1', minHeight: '150px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '1rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
                 <span style={{ fontSize: '0.7rem', opacity: 0.8, marginBottom: '0.5rem' }}>ANSWER</span>
                 <span style={{ fontSize: '1rem', lineHeight: 1.5 }}>{cards[ci].a}</span>
               </div>
@@ -1240,7 +1347,7 @@ function StudyDeck({ deck, c }) {
             {picked !== null && (
               <div style={{ marginTop: '0.5rem' }}>
                 {quiz[qi].why && <p style={{ fontSize: '0.82rem', color: c.subtext, marginBottom: '0.6rem' }}>{picked === Number(quiz[qi].answer) ? 'Correct. ' : 'Not quite. '}{quiz[qi].why}</p>}
-                <button type="button" onClick={nextQuestion} style={{ ...styles.chipBtn, borderColor: c.border, backgroundColor: c.accent, color: c.accentText }}>
+                <button type="button" onClick={nextQuestion} style={{ ...styles.chipBtn, borderColor: c.border, backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText }}>
                   {qi + 1 >= quiz.length ? 'See score' : 'Next question'}
                 </button>
               </div>
@@ -1279,6 +1386,8 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
           padding: '0.7rem 1rem',
           borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
           backgroundColor: isUser ? c.accent : c.surface,
+          backgroundImage: isUser ? c.accentGrad : 'none',
+          boxShadow: isUser ? `0 6px 16px ${c.accentSoft}` : '0 2px 10px rgba(0,0,0,0.12)',
           color: isUser ? c.accentText : c.text,
           border: isUser ? 'none' : `1px solid ${c.border}`,
           ...(isUser ? noSelectStyle : {}),
@@ -1731,7 +1840,7 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
               width: '28px',
               height: '28px',
               borderRadius: '50%',
-              backgroundColor: c.accent,
+              backgroundColor: c.accent, backgroundImage: c.accentGrad,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1802,6 +1911,20 @@ function Dashboard({ session }) {
   // component needs to know about the third "match device" option.
   const theme = themePreference === 'system' ? (systemPrefersDark ? 'dark' : 'light') : themePreference
   const [accentColor, setAccentColor] = useState(() => localStorage.getItem('radius-accent') || 'green')
+
+  // Share the palette with the global stylesheet (page background glow, focus
+  // rings, selection colour) so every screen follows the chosen theme.
+  useEffect(() => {
+    const pal = getPalette(theme, accentColor)
+    const root = document.documentElement.style
+    root.setProperty('--bg', pal.bg)
+    root.setProperty('--accent', pal.accent)
+    root.setProperty('--accent2', pal.accent2)
+    root.setProperty('--accent-soft', pal.accentSoft)
+    root.setProperty('--bg-glow', pal.bgGlow)
+    root.setProperty('--text', pal.text)
+    root.setProperty('color-scheme', theme === 'light' ? 'light' : 'dark')
+  }, [theme, accentColor])
   const [mode, setMode] = useState('calculative')
   const [tool, setTool] = useState('chat')
   const [usedThisHour, setUsedThisHour] = useState(null)
@@ -2538,7 +2661,7 @@ function Dashboard({ session }) {
   }
 
   return (
-    <div className="radius-app-shell" style={{ ...styles.dashboardContainer, backgroundColor: c.bg, color: c.text }}>
+    <div className="radius-app-shell" style={{ ...styles.dashboardContainer, backgroundColor: c.bg, backgroundImage: c.bgGlow, color: c.text }}>
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -2580,12 +2703,12 @@ function Dashboard({ session }) {
         <button onClick={() => setSidebarOpen(true)} style={styles.iconBtn}><MenuIcon color={c.text} /></button>
         {tool === 'chat' ? (
           <div style={styles.modeToggle}>
-            <button onClick={() => setMode('calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'calculative' ? c.accent : 'transparent', color: mode === 'calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Calculative</button>
-            <button onClick={() => setMode('non-calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'non-calculative' ? c.accent : 'transparent', color: mode === 'non-calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Non-Calculative</button>
+            <button onClick={() => setMode('calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'calculative' ? c.accent : 'transparent', backgroundImage: mode === 'calculative' ? c.accentGrad : 'none', color: mode === 'calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Calculative</button>
+            <button onClick={() => setMode('non-calculative')} style={{ ...styles.modeBtn, backgroundColor: mode === 'non-calculative' ? c.accent : 'transparent', backgroundImage: mode === 'non-calculative' ? c.accentGrad : 'none', color: mode === 'non-calculative' ? c.accentText : c.subtext, borderColor: c.border }}>Non-Calculative</button>
           </div>
         ) : (
           <div style={styles.modeToggle}>
-            <span style={{ ...styles.modeBtn, backgroundColor: c.accent, color: c.accentText, borderColor: c.border }}>{(TOOLS.find((t) => t.id === tool) || {}).label}</span>
+            <span style={{ ...styles.modeBtn, backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, borderColor: c.border }}>{(TOOLS.find((t) => t.id === tool) || {}).label}</span>
           </div>
         )}
         <button onClick={handleNewChat} style={styles.iconBtn}><NewChatIcon color={c.text} /></button>
@@ -2602,14 +2725,17 @@ function Dashboard({ session }) {
       <div style={styles.messagesArea}>
         {messages.length === 0 && !loading && (
           <div key={`${activeConversationId || 'new'}-${tool}`} className="radius-entrance" style={{ textAlign: 'center', margin: 'auto', padding: '0 1.2rem', maxWidth: '420px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.6rem' }}>
+              <Hero3D size={tool === 'chat' ? 150 : 110} />
+            </div>
             {tool === 'chat' || !TOOL_INFO[tool] ? (
               <>
-                <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>Welcome, {displayName}</p>
+                <p className="radius-display" style={{ fontSize: '1.5rem', fontWeight: 700 }}>Welcome, {displayName}</p>
                 <p style={{ color: c.subtext, marginTop: '0.4rem' }}>What assignment are we tackling today?</p>
               </>
             ) : (
               <>
-                <p style={{ fontSize: '1.4rem', fontWeight: 'bold' }}>{TOOL_INFO[tool].title}</p>
+                <p className="radius-display" style={{ fontSize: '1.5rem', fontWeight: 700 }}>{TOOL_INFO[tool].title}</p>
                 <p style={{ color: c.subtext, marginTop: '0.4rem' }}>{TOOL_INFO[tool].summary}</p>
                 <div style={{ textAlign: 'left', marginTop: '1.2rem', padding: '0.9rem 1rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.surface }}>
                   <p style={{ fontWeight: 'bold', fontSize: '0.85rem', marginBottom: '0.5rem' }}>How it works</p>
@@ -2661,14 +2787,14 @@ function Dashboard({ session }) {
 
         {loading && !streaming && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: c.subtext, padding: '0.4rem 0' }}>
-            <span className="radius-spinner" style={{ color: c.accent }} />
+            <Cube3D size={18} />
             Thinking...
           </div>
         )}
         {error && <p style={{ color: '#ef4444', padding: '0.4rem 0', textAlign: 'center' }}>{error}</p>}
         {retryPayload && !loading && (
           <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '0.6rem' }}>
-            <button type="button" onClick={handleRetry} style={{ ...styles.chipBtn, borderColor: c.accent, backgroundColor: c.accent, color: c.accentText, fontWeight: 'bold' }}>
+            <button type="button" onClick={handleRetry} style={{ ...styles.chipBtn, borderColor: c.accent, backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold' }}>
               Retry
             </button>
           </div>
@@ -2682,7 +2808,7 @@ function Dashboard({ session }) {
           <button
             key={t.id}
             onClick={() => { abortControllerRef.current?.abort(); handleNewChat(); setTool(t.id) }}
-            style={{ ...styles.modeBtn, flexShrink: 0, whiteSpace: 'nowrap', backgroundColor: tool === t.id ? c.accent : 'transparent', color: tool === t.id ? c.accentText : c.subtext, borderColor: c.border }}
+            style={{ ...styles.modeBtn, flexShrink: 0, whiteSpace: 'nowrap', backgroundColor: tool === t.id ? c.accent : 'transparent', backgroundImage: tool === t.id ? c.accentGrad : 'none', color: tool === t.id ? c.accentText : c.subtext, borderColor: c.border }}
           >
             {t.label}
           </button>
@@ -2703,7 +2829,7 @@ function Dashboard({ session }) {
                 <img src={file.preview} alt="attachment preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '10px', border: `1px solid ${c.border}` }} />
               ) : (
                 <div style={{ width: '70px', height: '70px', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.surface, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '4px', overflow: 'hidden' }}>
-                  <span style={{ fontSize: '0.6rem', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', backgroundColor: c.accent, color: c.accentText }}>
+                  <span style={{ fontSize: '0.6rem', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText }}>
                     {(file.name?.split('.').pop() || 'FILE').toUpperCase().slice(0, 4)}
                   </span>
                   <span style={{ fontSize: '0.6rem', color: c.subtext, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
@@ -2809,7 +2935,7 @@ function Dashboard({ session }) {
             type="button"
             onClick={toggleListening}
             aria-label={listening ? 'Stop voice input' : 'Start voice input'}
-            style={{ ...styles.attachBtn, justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0, backgroundColor: listening ? c.accent : 'transparent' }}
+            style={{ ...styles.attachBtn, justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0, backgroundColor: listening ? c.accent : 'transparent', backgroundImage: listening ? c.accentGrad : 'none' }}
           >
             <MicIcon color={listening ? c.accentText : c.text} />
           </button>
@@ -2818,7 +2944,7 @@ function Dashboard({ session }) {
           <button
             type="button"
             onClick={handleStopGenerating}
-            style={{ ...styles.sendBtn, backgroundColor: c.accent }}
+            style={{ ...styles.sendBtn, backgroundColor: c.accent, backgroundImage: c.accentGrad, boxShadow: `0 6px 18px ${c.accentGlow}` }}
             aria-label="Stop generating"
           >
             <StopIcon color={c.accentText} />
@@ -2829,7 +2955,8 @@ function Dashboard({ session }) {
             disabled={!assignmentText.trim() && attachedFiles.length === 0}
             style={{
               ...styles.sendBtn,
-              backgroundColor: c.accent,
+              backgroundColor: c.accent, backgroundImage: c.accentGrad,
+              boxShadow: `0 6px 18px ${c.accentGlow}`,
               opacity: !assignmentText.trim() && attachedFiles.length === 0 ? 0.4 : 1,
             }}
             aria-label="Send"
@@ -2916,7 +3043,7 @@ function App() {
       document.head.appendChild(el)
     }
     addTag('link', { rel: 'manifest', href: '/manifest.webmanifest' }, 'link[rel="manifest"]')
-    addTag('meta', { name: 'theme-color', content: '#0f0f0f' }, 'meta[name="theme-color"]')
+    addTag('meta', { name: 'theme-color', content: '#0a0c12' }, 'meta[name="theme-color"]')
     addTag('link', { rel: 'apple-touch-icon', href: '/logo.png' }, 'link[rel="apple-touch-icon"]')
     if ('serviceWorker' in navigator && import.meta.env.PROD) {
       navigator.serviceWorker.register('/sw.js').catch(() => {})
@@ -2938,7 +3065,12 @@ function App() {
   }, [])
 
   if (checkingSession) {
-    return <div style={styles.container}><p>Loading...</p></div>
+    return (
+      <div style={styles.container}>
+        <Hero3D size={200} />
+        <p style={{ color: '#8f98ae', marginTop: '0.4rem', letterSpacing: '0.04em' }}>Starting RADIUS...</p>
+      </div>
+    )
   }
 
   if (passwordRecovery) {
@@ -3021,40 +3153,40 @@ const TOOL_PLACEHOLDERS = {
 }
 
 const styles = {
-  container: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem', fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#0f0f0f', color: '#fff' },
-  dashboardContainer: { display: 'flex', flexDirection: 'column', fontFamily: 'sans-serif', maxWidth: '640px', margin: '0 auto', width: '100%' },
-  settingsContainer: { minHeight: '100vh', padding: '1.2rem', fontFamily: 'sans-serif', maxWidth: '640px', margin: '0 auto', width: '100%' },
+  container: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem', fontFamily: 'inherit', textAlign: 'center', backgroundColor: '#0a0c12', backgroundImage: 'radial-gradient(700px 420px at 50% -5%, rgba(52, 210, 123, 0.16), transparent 65%), radial-gradient(500px 360px at 100% 100%, rgba(168, 119, 247, 0.1), transparent 65%)', color: '#fff' },
+  dashboardContainer: { display: 'flex', flexDirection: 'column', fontFamily: 'inherit', maxWidth: '640px', margin: '0 auto', width: '100%' },
+  settingsContainer: { minHeight: '100vh', padding: '1.2rem', fontFamily: 'inherit', maxWidth: '640px', margin: '0 auto', width: '100%' },
   topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.2rem' },
   iconBtn: { background: 'none', border: 'none', cursor: 'pointer', padding: '0.3rem' },
-  logoWrapper: { width: '160px', height: '160px', borderRadius: '16px', border: '3px solid #ffffff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem', backgroundColor: '#0f0f0f' },
-  logoWrapperSmall: { width: '36px', height: '36px', borderRadius: '8px', border: '1.5px solid #fff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f0f0f', flexShrink: 0 },
+  logoWrapper: { width: '160px', height: '160px', borderRadius: '16px', border: '3px solid #ffffff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem', backgroundColor: '#0a0c12' },
+  logoWrapperSmall: { width: '36px', height: '36px', borderRadius: '8px', border: '1.5px solid #fff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0c12', flexShrink: 0 },
   logo: { width: '100%', height: '100%', objectFit: 'cover' },
   subtitle: { color: '#aaa', marginBottom: '2rem' },
   form: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '320px', gap: '0.8rem' },
-  input: { padding: '0.8rem', borderRadius: '8px', border: '1px solid #333', backgroundColor: '#1a1a1a', color: '#fff', fontSize: '1rem' },
-  button: { padding: '0.8rem', borderRadius: '8px', border: 'none', backgroundColor: '#ffffff', color: '#000', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem' },
-  googleButton: { marginTop: '1rem', padding: '0.8rem', borderRadius: '8px', border: '1px solid #333', backgroundColor: 'transparent', color: '#fff', width: '100%', maxWidth: '320px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  input: { padding: '0.85rem 1rem', borderRadius: '14px', border: '1.5px solid #262d42', backgroundColor: '#121622', color: '#fff', fontSize: '1rem' },
+  button: { padding: '0.9rem', borderRadius: '14px', border: 'none', backgroundColor: '#34d27b', backgroundImage: 'linear-gradient(135deg, #34d27b, #1fb862)', color: '#052412', fontWeight: 700, cursor: 'pointer', fontSize: '1rem', boxShadow: '0 8px 22px rgba(52, 210, 123, 0.28)' },
+  googleButton: { marginTop: '1rem', padding: '0.8rem', borderRadius: '8px', border: '1px solid #262d42', backgroundColor: 'transparent', color: '#fff', width: '100%', maxWidth: '320px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   toggle: { marginTop: '1.2rem', color: '#888', cursor: 'pointer', fontSize: '0.9rem' },
   message: { marginTop: '1rem', color: '#4ade80' },
   modeToggle: { display: 'flex', gap: '0.4rem' },
-  modeBtn: { padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' },
+  modeBtn: { padding: '0.5rem 0.95rem', borderRadius: '20px', border: '1.5px solid', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.01em' },
   messagesArea: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '1rem', overflowY: 'auto', WebkitOverflowScrolling: 'touch' },
-  subjectInput: { margin: '0 1rem 0.6rem 1rem', padding: '0.6rem 1rem', borderRadius: '20px', border: '1px solid', fontSize: '0.85rem', outline: 'none' },
-  bottomBar: { display: 'flex', alignItems: 'flex-end', gap: '0.6rem', padding: '0.6rem', margin: '0 1rem 1rem 1rem', borderRadius: '24px', border: '1px solid' },
+  subjectInput: { margin: '0 1rem 0.6rem 1rem', padding: '0.7rem 1.05rem', borderRadius: '16px', border: '1.5px solid', fontSize: '0.88rem', outline: 'none', fontWeight: 500 },
+  bottomBar: { display: 'flex', alignItems: 'flex-end', gap: '0.6rem', padding: '0.6rem', margin: '0 1rem 1rem 1rem', borderRadius: '26px', border: '1.5px solid', boxShadow: '0 10px 30px rgba(0,0,0,0.22)' },
   attachBtn: { display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.3rem', background: 'none', border: 'none' },
   attachMenuOverlay: { position: 'fixed', inset: 0, zIndex: 55 },
-  attachMenu: { position: 'absolute', bottom: '48px', left: 0, borderRadius: '12px', border: '1px solid', padding: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.2rem', zIndex: 60, minWidth: '150px' },
+  attachMenu: { position: 'absolute', bottom: '48px', left: 0, borderRadius: '16px', boxShadow: '0 14px 34px rgba(0,0,0,0.35)', border: '1px solid', padding: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.2rem', zIndex: 60, minWidth: '150px' },
   attachMenuItem: { display: 'flex', alignItems: 'center', gap: '0.7rem', padding: '0.55rem 0.5rem', borderRadius: '10px', cursor: 'pointer', fontSize: '0.9rem' },
   attachMenuIconWrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0 },
   bottomInput: { flex: 1, border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '1rem', fontFamily: 'inherit', resize: 'none', overflowY: 'auto', maxHeight: '150px', lineHeight: '1.4', padding: '0.4rem 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
   sendBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0 },
   themeBtn: { flex: 1, padding: '0.6rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
-  logoutBtn: { width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 'bold' },
+  logoutBtn: { width: '100%', padding: '0.85rem', borderRadius: '14px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 700 },
   sidebarOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 40 },
   sidebarPanel: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '80%', maxWidth: '300px', borderRight: '1px solid', zIndex: 50, display: 'flex', flexDirection: 'column' },
   newChatSidebarBtn: { display: 'flex', alignItems: 'center', gap: '0.6rem', margin: '0 1rem', padding: '0.6rem 0.8rem', borderRadius: '8px', border: '1.5px solid', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '0.9rem' },
   msgFeedbackBtn: { background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' },
-  chipBtn: { padding: '0.45rem 0.85rem', borderRadius: '20px', border: '1px solid', backgroundColor: 'transparent', fontSize: '0.82rem', cursor: 'pointer' },
+  chipBtn: { padding: '0.5rem 0.95rem', borderRadius: '20px', border: '1.5px solid', backgroundColor: 'transparent', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' },
 }
 
 export default App
