@@ -61,7 +61,7 @@ When the student replies with answers: mark each one, briefly explain mistakes, 
 // messages that look like they need fresh facts, to save the monthly quota.
 // Needs TAVILY_API_KEY in Vercel. Set SEARCH_ALWAYS=true to search every time.
 // ---------------------------------------------------------------------------
-const SEARCH_HINTS = /\b(latest|newest|current|currently|recent|recently|today|tonight|this (year|month|week)|news|updates?|updated|releas(e|ed|es)|launch(ed|es)?|announce[sd]?|prices?|version|202[3-9]|who is the|who won|champions?|president|prime minister|ceo|trending|breakthrough|discover(y|ies)|iphone|galaxy|pixel|samsung|apple|google|openai|chatgpt|gpt|gemini|claude|windows|android|ios|tesla|bitcoin|crypto|ethereum|election|world cup|premier league|exchange rate|stock|inflation|policy)\b/i
+const SEARCH_HINTS = /\b(latest|newest|current|currently|recent|recently|breaking|news|this (year|month|week)|right now|as of now|updates? (on|about|to)|releas(e|ed|es)|launch(ed|es)?|announce[sd]?|prices? (of|for)|how much (is|does|do)|version|202[4-9]|who is the|who won|champions?|president|prime minister|ceo of|trending|breakthrough|discover(y|ies)|iphone|galaxy|pixel|samsung|apple|openai|chatgpt|gpt|gemini|tesla|nvidia|playstation|xbox|bitcoin|crypto|ethereum|election|world cup|premier league|exchange rate)\b/i
 
 async function webSearch(query) {
   const key = process.env.TAVILY_API_KEY
@@ -207,7 +207,7 @@ MATH FORMATTING RULES (calculative mode):
 
 TABLES: When the student asks for a table, a comparison, a schedule, or any tabulated data, output a valid GitHub-flavoured markdown table: one header row, then a separator row like | --- | --- |, then each data row on its own line, with exactly the same number of columns in every row. Put a blank line before and after the table. Keep cell text short with no line breaks inside cells, and write every row before any commentary. Use - for a value you do not know instead of guessing. Put your verdict or summary in one or two sentences after the table, never inside it.
 
-CURRENT INFORMATION: Today's date is ${todayText}. Your built-in knowledge stops at an earlier date, so newer products, events, releases, prices, rules and research may exist that you do not know about. Never tell the student that something does not exist, has not been released, or has not happened just because you do not recognise it. If a WEB SEARCH RESULTS block is included in the student's message, treat it as newer than your training and base your answer on it, referring to results as [1], [2] and so on. If it does not answer the question, say so. If there are no search results, say you cannot confirm the very latest details and give your best understanding without denying anything. Never present rumours or guesses as confirmed facts, and never describe a past year as the present.
+CURRENT INFORMATION: Today's date is ${todayText}. Your built-in knowledge stops at an earlier date, so newer products, events, releases, prices, rules and research may exist that you do not know about. Never tell the student that something does not exist, has not been released, or has not happened just because you do not recognise it. If a WEB SEARCH RESULTS block is included in the student's message, treat it as newer than your training and base your answer on it, referring to a result as [1], [2] and so on only when you actually used it, and never mentioning the search at all when it was not relevant to what the student said. If it does not answer the question, say so. If there are no search results, say you cannot confirm the very latest details and give your best understanding without denying anything. Never present rumours or guesses as confirmed facts, and never describe a past year as the present.
 
 IMAGES: If the student attaches images or files, they may contain handwritten or printed assignments, problems, or questions — possibly spanning multiple pages or multiple related items. Read all of them carefully and respond to what they actually contain, treating them as one combined assignment unless they clearly look unrelated.
 
@@ -230,11 +230,14 @@ ${closingLine}`
     tool === 'chat' &&
     mode !== 'calculative' &&
     typeof assignmentText === 'string' &&
-    assignmentText.trim().length > 3 &&
-    (process.env.SEARCH_ALWAYS === 'true' || SEARCH_HINTS.test(assignmentText))
+    assignmentText.trim().length > 3
   if (searchEligible) {
+    // Judge the student's own words only, not the quoted message they replied to.
     const q = assignmentText.replace(/^\[The student is replying to [\s\S]*?"\]\s*/i, '').trim().slice(0, 300)
-    if (q) searchResults = await webSearch(q)
+    const casual = q.length < 15 || (/^(ok|okay|alright|thanks|thank you|thx|hello|hi|hey|sure|yes|yeah|no|cool|great|nice|good)\b/i.test(q) && !q.includes('?'))
+    if (q && !casual && (process.env.SEARCH_ALWAYS === 'true' || SEARCH_HINTS.test(q))) {
+      searchResults = await webSearch(q)
+    }
   }
   const searchBlock = searchResults.length
     ? `\n\n[WEB SEARCH RESULTS fetched just now (today is ${todayText}). They are newer than your training data. Base your answer on them for anything recent, refer to them as [1], [2] and so on when you use them, and if they do not answer the question, say so instead of guessing.]\n` +
@@ -528,8 +531,16 @@ ${closingLine}`
       }
     }
 
+    // Only show sources the answer actually used (cited as [1], [2]...). They
+    // go out as a hidden marker; the app shows them as small site logos.
     if (searchResults.length) {
-      text += '\n\n**Sources**\n' + searchResults.map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n')
+      const used = new Set()
+      for (const m of text.matchAll(/\[(\d{1,2})\]/g)) {
+        const n = Number(m[1])
+        if (n >= 1 && n <= searchResults.length) used.add(n - 1)
+      }
+      const list = Array.from(used).sort((a, b) => a - b).slice(0, 5).map((i) => ({ u: searchResults[i].url, t: searchResults[i].title }))
+      if (list.length) text += `\n\n<!--SRC:${encodeURIComponent(JSON.stringify(list))}-->`
     }
 
     if (wantStream) {
