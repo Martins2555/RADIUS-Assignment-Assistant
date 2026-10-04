@@ -291,15 +291,6 @@ const accentColors = {
 }
 const accentOrder = ['green', 'blue', 'purple', 'pink', 'orange', 'teal', 'cyan', 'indigo', 'red', 'amber', 'lime', 'magenta']
 
-// Quick follow-up actions shown after an assignment-type reply.
-const STUDY_ACTIONS = [
-  { label: 'Explain this', prompt: 'Explain this topic clearly, from the basics up, with one worked example.' },
-  { label: 'Give me a hint', prompt: "Don't give the answer. Give me one hint for the next step only." },
-  { label: 'Quiz me', prompt: 'Quiz me with 5 questions on this topic, one at a time. Wait for my answer before revealing the next.' },
-  { label: 'Summarize', prompt: 'Summarize this topic into short revision notes I can memorise.' },
-  { label: 'Show solution', prompt: 'Now show the complete worked solution with every step and the final answer.' },
-]
-
 const RESPONSE_STYLES = [
   { value: 'concise', label: 'Concise — straight to the point' },
   { value: 'balanced', label: 'Balanced — clear steps' },
@@ -441,6 +432,84 @@ function Logo({ small }) {
   )
 }
 
+// ---- Password strength -------------------------------------------------------
+// Weak: shorter than 8 characters, or missing a number or a letter (blocked).
+// Strong: 8+ characters with letters and numbers (the minimum to sign up).
+// Very strong: Strong plus a symbol (recommended, not required).
+function passwordStrength(pw) {
+  const p = pw || ''
+  if (!p) return { level: 0, bars: 0, label: '', color: '#888', ok: false, hint: '' }
+  const hasLetter = /[A-Za-z]/.test(p)
+  const hasNumber = /[0-9]/.test(p)
+  const hasSymbol = /[^A-Za-z0-9]/.test(p)
+  const longEnough = p.length >= 8
+  if (longEnough && hasLetter && hasNumber) {
+    return hasSymbol
+      ? { level: 3, bars: 4, label: 'Very strong', color: '#22c55e', ok: true, hint: '' }
+      : { level: 2, bars: 3, label: 'Strong', color: '#84cc16', ok: true, hint: 'Add a symbol like @ # ! to make it very strong.' }
+  }
+  const needs = []
+  if (!longEnough) needs.push('at least 8 characters')
+  if (!hasNumber) needs.push('a number')
+  if (!hasLetter) needs.push('a letter')
+  const progress = 3 - needs.length
+  return {
+    level: 1,
+    bars: progress >= 2 ? 2 : 1,
+    label: 'Weak',
+    color: progress >= 2 ? '#f97316' : '#ef4444',
+    ok: false,
+    hint: `Needs ${needs.join(', ')}.`,
+  }
+}
+
+function PasswordMeter({ password }) {
+  if (!password) return null
+  const st = passwordStrength(password)
+  return (
+    <div style={{ textAlign: 'left', marginTop: '-0.2rem' }} aria-live="polite">
+      <div style={{ display: 'flex', gap: '4px' }}>
+        {[1, 2, 3, 4].map((i) => (
+          <span
+            key={i}
+            style={{ flex: 1, height: '5px', borderRadius: '3px', backgroundColor: i <= st.bars ? st.color : 'rgba(255,255,255,0.14)', transition: 'background-color 0.2s ease' }}
+          />
+        ))}
+      </div>
+      <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: st.color, fontWeight: 700 }}>
+        {st.label}
+        {st.hint && <span style={{ color: '#8f98ae', fontWeight: 400 }}>{` - ${st.hint}`}</span>}
+      </p>
+    </div>
+  )
+}
+
+// A password box with its own show/hide eye.
+function PasswordInput({ value, onChange, placeholder, autoComplete }) {
+  const [show, setShow] = useState(false)
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type={show ? 'text' : 'password'}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        autoComplete={autoComplete}
+        required
+        style={{ ...styles.input, width: '100%', boxSizing: 'border-box', paddingRight: '2.6rem' }}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((v) => !v)}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        style={{ position: 'absolute', right: '0.7rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex' }}
+      >
+        {show ? <EyeOffIcon color="#888" /> : <EyeIcon color="#888" />}
+      </button>
+    </div>
+  )
+}
+
 function AuthScreen({ initialSignUp = true }) {
   const [isSignUp, setIsSignUp] = useState(initialSignUp)
   const [email, setEmail] = useState('')
@@ -455,6 +524,13 @@ function AuthScreen({ initialSignUp = true }) {
 
   const handleAuth = async (e) => {
     e.preventDefault()
+    if (isSignUp) {
+      const strength = passwordStrength(password)
+      if (!strength.ok) {
+        setMessage(`Choose a stronger password. ${strength.hint}`)
+        return
+      }
+    }
     setLoading(true)
     setMessage('')
     if (isSignUp) {
@@ -552,7 +628,12 @@ function AuthScreen({ initialSignUp = true }) {
             {showPassword ? <EyeOffIcon color="#888" /> : <EyeIcon color="#888" />}
           </button>
         </div>
-        <button type="submit" disabled={loading} style={styles.button}>
+        {isSignUp && <PasswordMeter password={password} />}
+        <button
+          type="submit"
+          disabled={loading || (isSignUp && !passwordStrength(password).ok)}
+          style={{ ...styles.button, opacity: isSignUp && !passwordStrength(password).ok ? 0.45 : 1 }}
+        >
           {loading ? 'Please wait...' : isSignUp ? 'Sign Up' : 'Log In'}
         </button>
       </form>
@@ -947,6 +1028,9 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         <p style={{ color: c.subtext, fontSize: '0.75rem', marginTop: '0.7rem' }}>Custom backgrounds are coming with premium.</p>
       </SettingsCard>
 
+      {/* Notifications */}
+      <NotificationsCard c={c} session={session} />
+
       {/* Messaging */}
       <SettingsCard c={c}>
         <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '0 0 0.7rem' }}>MESSAGING</p>
@@ -1209,19 +1293,80 @@ const STUDY_RE = /\n*<!--STUDY:([\s\S]*?)-->/
 
 const SRC_RE = /\n*<!--SRC:([\s\S]*?)-->/
 
+// Explain and Show solution replies are saved with a small leading marker so
+// they show as labelled cards, also after the chat is reopened.
+const KIND_RE = /^\s*<!--KIND:(\w+)-->\n?/
+
+// Saved (hidden) when the student presses Stop before any text arrived, so the
+// server knows not to finish and announce that answer in the background.
+const STOP_MARKER = '<!--STOPPED-->'
+const visibleRows = (rows) => (rows || []).filter((m) => m.content !== STOP_MARKER)
+
 function splitStudy(content) {
   let raw = content || ''
   let sources = []
+  let kind = null
+  const km = raw.match(KIND_RE)
+  if (km) {
+    kind = km[1]
+    raw = raw.replace(KIND_RE, '')
+  }
   const sm = raw.match(SRC_RE)
   if (sm) {
     try { sources = JSON.parse(decodeURIComponent(sm[1])) } catch (e) { sources = [] }
     raw = raw.replace(SRC_RE, '')
   }
   const m = raw.match(STUDY_RE)
-  if (!m) return { text: raw.trim(), deck: null, sources }
+  if (!m) return { text: raw.trim(), deck: null, sources, kind }
   let deck = null
   try { deck = JSON.parse(decodeURIComponent(m[1])) } catch (e) { deck = null }
-  return { text: raw.replace(STUDY_RE, '').trim(), deck, sources }
+  return { text: raw.replace(STUDY_RE, '').trim(), deck, sources, kind }
+}
+
+// Turns the on-screen messages into the history sent to the model. Hidden
+// markers are removed, and two messages in a row from the same side (for
+// example an Explain card after a reply) are joined so turns always alternate.
+function buildHistory(msgs) {
+  const out = []
+  for (const m of msgs || []) {
+    const text = splitStudy(m.content).text
+    if (!text) continue
+    const last = out[out.length - 1]
+    if (last && last.role === m.role) last.content += '\n\n' + text
+    else out.push({ role: m.role, content: text })
+  }
+  return out
+}
+
+// Pulls the attached images/PDFs back out of a saved user message so a
+// regenerated answer can read them again.
+function extractFilesFromContent(content) {
+  const files = []
+  const re = /(!?)\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g
+  let m
+  while ((m = re.exec(content || '')) !== null) {
+    const url = m[2]
+    if (!url.includes('/storage/v1/')) continue
+    const path = url.split('?')[0].toLowerCase()
+    let mimeType = null
+    if (path.endsWith('.pdf')) mimeType = 'application/pdf'
+    else if (/\.jpe?g$/.test(path)) mimeType = 'image/jpeg'
+    else if (path.endsWith('.png')) mimeType = 'image/png'
+    else if (path.endsWith('.webp')) mimeType = 'image/webp'
+    else if (m[1] === '!') mimeType = 'image/jpeg'
+    if (mimeType) files.push({ url, mimeType })
+  }
+  return files.slice(0, 10)
+}
+
+// The student's own words from a saved user message: no quoted reply block
+// and no attachment links.
+function stripAttachmentMarkdown(content) {
+  return (content || '')
+    .replace(/^(?:>.*\n)+\n*/, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[\u{1F4C4} [^\]]*\]\([^)]*\)/gu, '')
+    .trim()
 }
 
 // Small site-logo chips shown under a reply that used web search results.
@@ -1400,10 +1545,12 @@ function StudyDeck({ deck, c }) {
   )
 }
 
-function MessageBubble({ id, role, content, theme, accentColor, feedback, onLongPress, onCopy, onFeedback, onShare, onExportPdf, onReply }) {
+function MessageBubble({ id, role, content, theme, accentColor, feedback, defaultOpen, onLongPress, onCopy, onFeedback, onShare, onExportPdf, onReply, onSaveLibrary }) {
   const c = getPalette(theme, accentColor)
   const isUser = role === 'user'
-  const { text: displayText, deck, sources } = isUser ? { text: content, deck: null, sources: [] } : splitStudy(content)
+  const { text: displayText, deck, sources, kind } = isUser ? { text: content, deck: null, sources: [], kind: null } : splitStudy(content)
+  const [solutionOpen, setSolutionOpen] = useState(!!defaultOpen)
+  const collapsed = !isUser && kind === 'solution' && !solutionOpen
   // Only user messages get the custom long-press menu (copy/edit) — they have
   // no action buttons below them. AI replies already have copy/feedback
   // buttons right underneath, so long-pressing one falls through to normal
@@ -1419,6 +1566,24 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
       <div ref={swipe.iconRef} style={{ position: 'absolute', left: '6px', top: '14px', width: '30px', height: '30px', borderRadius: '50%', backgroundColor: c.surface, border: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, transform: 'scale(0.85)', pointerEvents: 'none' }}>
         <ReplyIcon color={c.text} />
       </div>
+      {!isUser && (kind === 'explain' || kind === 'solution') && (
+        <button
+          type="button"
+          onClick={() => kind === 'solution' && setSolutionOpen((v) => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', margin: '0 0 0.25rem 0.2rem', background: 'none', border: 'none', padding: 0, color: c.accent, fontSize: '0.74rem', fontWeight: 800, cursor: kind === 'solution' ? 'pointer' : 'default' }}
+        >
+          {kind === 'solution' ? `Full solution ${solutionOpen ? '▾' : '▸'}` : 'Explanation'}
+        </button>
+      )}
+      {collapsed ? (
+        <button
+          type="button"
+          onClick={() => setSolutionOpen(true)}
+          style={{ ...styles.chipBtn, borderColor: c.border, color: c.text, borderStyle: 'dashed', padding: '0.7rem 1.1rem' }}
+        >
+          Tap to reveal the full solution
+        </button>
+      ) : (
       <div
         ref={swipe.bubbleRef}
         {...pressHandlers}
@@ -1525,6 +1690,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
           </ReactMarkdown>
         </div>
       </div>
+      )}
       {!isUser && deck && <StudyDeck deck={deck} c={c} />}
       {!isUser && sources.length > 0 && <SourceChips sources={sources} c={c} />}
       {!isUser && (
@@ -1541,6 +1707,11 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, onLong
           <button type="button" onClick={() => onExportPdf(displayText)} style={styles.msgFeedbackBtn} aria-label="Save as PDF">
             <DownloadIcon color={c.subtext} />
           </button>
+          {onSaveLibrary && (
+            <button type="button" onClick={() => onSaveLibrary(displayText, kind, deck)} style={styles.msgFeedbackBtn} aria-label="Save to Study Library">
+              <BookmarkIcon color={c.subtext} />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onFeedback(id, feedback === 'up' ? null : 'up')}
@@ -1701,7 +1872,7 @@ function ConversationRow({ conv, isActive, c, onSelect, onLongPress, isRenaming,
   )
 }
 
-function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, onGoHome, onOpenAbout, onRenameConversation, onDeleteConversation, onTogglePin, theme, accentColor, session }) {
+function Sidebar({ open, onClose, conversations, activeConversationId, onSelectConversation, onNewChat, onOpenSettings, onGoHome, onOpenAbout, onOpenLibrary, onRenameConversation, onDeleteConversation, onTogglePin, theme, accentColor, session }) {
   const c = getPalette(theme, accentColor)
   const [rowMenu, setRowMenu] = useState(null)
   const [renamingId, setRenamingId] = useState(null)
@@ -1804,6 +1975,7 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
           {[
             { key: 'home', label: 'Home', onClick: onGoHome },
             { key: 'assistant', label: 'Assistant', onClick: onNewChat },
+            { key: 'library', label: 'Study Library', onClick: onOpenLibrary },
             { key: 'about', label: 'About', onClick: onOpenAbout },
           ].map((item) => (
             <div
@@ -1932,6 +2104,619 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
   )
 }
 
+// ---- Small shared pieces for the new features ---------------------------------
+
+function BookmarkIcon({ color, filled }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill={filled ? color : 'none'}>
+      <path d="M6 4h12a1 1 0 0 1 1 1v15l-7-4.5L5 20V5a1 1 0 0 1 1-1z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function MarkdownBlock({ text, c }) {
+  return (
+    <div style={{ lineHeight: 1.6, fontSize: '0.92rem' }} className="radius-markdown">
+      <ReactMarkdown
+        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          table: ({ node, ...rest }) => (
+            <div data-noswipe="true" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '0.5rem 0 0.8rem', borderRadius: '10px', border: `1px solid ${c.border}` }}>
+              <table {...rest} style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem' }} />
+            </div>
+          ),
+          th: ({ node, ...rest }) => <th {...rest} style={{ textAlign: 'left', padding: '0.5rem 0.7rem', fontWeight: 'bold', minWidth: '90px', backgroundColor: c.bg, borderBottom: `1px solid ${c.border}` }} />,
+          td: ({ node, ...rest }) => <td {...rest} style={{ textAlign: 'left', padding: '0.5rem 0.7rem', verticalAlign: 'top', minWidth: '90px', borderBottom: `1px solid ${c.border}` }} />,
+          a: (props) => <a href={props.href} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{props.children}</a>,
+          p: (props) => <p {...props} style={{ margin: '0 0 0.5rem 0' }} />,
+        }}
+      >
+        {text || ''}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+const KIND_LABELS = { quiz: 'Quiz', summary: 'Summary', hint: 'Hint', solution: 'Solution', explain: 'Explanation', note: 'Note' }
+
+function btnPrimary(c) {
+  return { ...styles.chipBtn, borderColor: c.accent, backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText }
+}
+
+// ---- Quick action bar under an assignment reply ---------------------------------
+// Each button has its own behaviour. The small choices (what to change, which
+// part to explain, quiz size) open inline right under the buttons.
+function Choice({ c, active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{ ...styles.chipBtn, padding: '0.4rem 0.8rem', fontSize: '0.78rem', borderColor: active ? c.accent : c.border, backgroundColor: active ? c.accentSoft : 'transparent', color: c.text }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ChoiceRow({ c, label, children }) {
+  return (
+    <div style={{ marginTop: '0.55rem' }}>
+      <p style={{ margin: '0 0 0.35rem', fontSize: '0.74rem', color: c.subtext, fontWeight: 700 }}>{label}</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>{children}</div>
+    </div>
+  )
+}
+
+function ActionBar({ c, canRegen, panel, setPanel, busy, hintLevel, explainOpts, setExplainOpts, parts, quizOpts, setQuizOpts, onRegen, onExplain, onHint, onQuiz, onSummary, onSolution }) {
+  const chip = (id, label, onClick, active) => (
+    <button
+      key={id}
+      type="button"
+      disabled={busy}
+      onClick={onClick}
+      style={{ ...styles.chipBtn, borderColor: active ? c.accent : c.border, backgroundColor: active ? c.accentSoft : 'transparent', color: c.text, opacity: busy ? 0.6 : 1 }}
+    >
+      {label}
+    </button>
+  )
+  const toggle = (id) => setPanel(panel === id ? null : id)
+
+  return (
+    <div style={{ margin: '0.5rem 0 0.8rem' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+        {canRegen && chip('regen', 'Regenerate', () => toggle('regen'), panel === 'regen')}
+        {chip('explain', 'Explain this', () => toggle('explain'), panel === 'explain')}
+        {chip('hint', hintLevel > 0 ? `Hint (${hintLevel}/3)` : 'Give me a hint', () => { setPanel(null); onHint() }, false)}
+        {chip('quiz', 'Quiz me', () => toggle('quiz'), panel === 'quiz')}
+        {chip('summary', 'Summarize', () => { setPanel(null); onSummary() }, false)}
+        {chip('solution', 'Show solution', () => { setPanel(null); onSolution() }, false)}
+      </div>
+
+      {panel === 'regen' && (
+        <div style={{ marginTop: '0.6rem', padding: '0.7rem 0.8rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.surface }}>
+          <p style={{ margin: 0, fontSize: '0.82rem', fontWeight: 700 }}>What should change?</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.5rem' }}>
+            <Choice c={c} onClick={() => onRegen('shorter')}>Shorter</Choice>
+            <Choice c={c} onClick={() => onRegen('simpler')}>Simpler</Choice>
+            <Choice c={c} onClick={() => onRegen('steps')}>More steps</Choice>
+            <Choice c={c} onClick={() => onRegen('method')}>Different method</Choice>
+            <Choice c={c} onClick={() => onRegen('redo')}>Just redo it</Choice>
+          </div>
+        </div>
+      )}
+
+      {panel === 'explain' && (
+        <div style={{ padding: '0.7rem 0.8rem', marginTop: '0.6rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.surface }}>
+          <p style={{ margin: 0, fontSize: '0.82rem', fontWeight: 700 }}>Explain what, and how?</p>
+          <ChoiceRow c={c} label="What">
+            <Choice c={c} active={explainOpts.scope === 'all'} onClick={() => setExplainOpts({ ...explainOpts, scope: 'all', part: null })}>Whole answer</Choice>
+            <Choice c={c} active={explainOpts.scope === 'part'} onClick={() => setExplainOpts({ ...explainOpts, scope: 'part' })}>One part</Choice>
+          </ChoiceRow>
+          {explainOpts.scope === 'part' && (
+            <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: '190px', overflowY: 'auto' }}>
+              {parts.length === 0 && <p style={{ margin: 0, fontSize: '0.8rem', color: c.subtext }}>No separate parts found. Use Whole answer.</p>}
+              {parts.map((pt, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setExplainOpts({ ...explainOpts, part: pt.full })}
+                  style={{ textAlign: 'left', padding: '0.45rem 0.65rem', borderRadius: '10px', border: `1.5px solid ${explainOpts.part === pt.full ? c.accent : c.border}`, backgroundColor: explainOpts.part === pt.full ? c.accentSoft : 'transparent', color: c.text, fontSize: '0.8rem', cursor: 'pointer' }}
+                >
+                  {pt.short}
+                </button>
+              ))}
+            </div>
+          )}
+          <ChoiceRow c={c} label="How">
+            <Choice c={c} active={explainOpts.how === 'simple'} onClick={() => setExplainOpts({ ...explainOpts, how: 'simple' })}>Simple</Choice>
+            <Choice c={c} active={explainOpts.how === 'deeper'} onClick={() => setExplainOpts({ ...explainOpts, how: 'deeper' })}>Deeper</Choice>
+            <Choice c={c} active={explainOpts.how === 'example'} onClick={() => setExplainOpts({ ...explainOpts, how: 'example' })}>With an example</Choice>
+          </ChoiceRow>
+          <button
+            type="button"
+            disabled={explainOpts.scope === 'part' && !explainOpts.part}
+            onClick={onExplain}
+            style={{ ...btnPrimary(c), marginTop: '0.7rem', opacity: explainOpts.scope === 'part' && !explainOpts.part ? 0.45 : 1 }}
+          >
+            Explain
+          </button>
+        </div>
+      )}
+
+      {panel === 'quiz' && (
+        <div style={{ padding: '0.7rem 0.8rem', marginTop: '0.6rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.surface }}>
+          <p style={{ margin: 0, fontSize: '0.82rem', fontWeight: 700 }}>Set up your quiz</p>
+          <ChoiceRow c={c} label="Questions">
+            {[5, 8, 10].map((n) => <Choice key={n} c={c} active={quizOpts.count === n} onClick={() => setQuizOpts({ ...quizOpts, count: n })}>{n}</Choice>)}
+          </ChoiceRow>
+          <ChoiceRow c={c} label="Difficulty">
+            {[['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']].map(([v, l]) => <Choice key={v} c={c} active={quizOpts.difficulty === v} onClick={() => setQuizOpts({ ...quizOpts, difficulty: v })}>{l}</Choice>)}
+          </ChoiceRow>
+          <ChoiceRow c={c} label="Type">
+            {[['mcq', 'Multiple choice'], ['calc', 'Calculation'], ['short', 'Short answer']].map(([v, l]) => <Choice key={v} c={c} active={quizOpts.type === v} onClick={() => setQuizOpts({ ...quizOpts, type: v })}>{l}</Choice>)}
+          </ChoiceRow>
+          <button type="button" onClick={onQuiz} style={{ ...btnPrimary(c), marginTop: '0.7rem' }}>Start quiz</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Hints and summaries appear as temporary cards under the chat. They are not
+// added to the chat history, but can be saved to the Study Library.
+function TempCards({ cards, c, hintLevel, busy, onDismiss, onSave, onMoreHint, onSolution, onCopy, onPdf, onFlashcards }) {
+  if (!cards.length) return null
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', margin: '0.3rem 0 0.8rem' }}>
+      {cards.map((card, i) => {
+        const isLast = i === cards.length - 1
+        return (
+          <div key={card.id} className="radius-entrance" style={{ padding: '0.8rem 0.9rem', borderRadius: '16px', border: `1px solid ${c.border}`, borderLeft: `4px solid ${c.accent}`, backgroundColor: c.surface }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 800, color: c.accent }}>{card.title}</span>
+              <button type="button" onClick={() => onDismiss(card.id)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: c.subtext, cursor: 'pointer', fontSize: '0.95rem', padding: '0 0.2rem' }}>✕</button>
+            </div>
+            <MarkdownBlock text={card.content} c={c} />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginTop: '0.6rem' }}>
+              {card.kind === 'hint' && isLast && hintLevel < 3 && (
+                <button type="button" disabled={busy} onClick={onMoreHint} style={{ ...btnPrimary(c), opacity: busy ? 0.6 : 1 }}>Another hint</button>
+              )}
+              {card.kind === 'hint' && isLast && hintLevel >= 3 && (
+                <>
+                  <span style={{ fontSize: '0.78rem', color: c.subtext, alignSelf: 'center' }}>That was the last hint.</span>
+                  <button type="button" onClick={onSolution} style={btnPrimary(c)}>Show solution</button>
+                </>
+              )}
+              {card.kind === 'summary' && (
+                <>
+                  <button type="button" disabled={busy} onClick={onFlashcards} style={{ ...btnPrimary(c), opacity: busy ? 0.6 : 1 }}>Make flashcards</button>
+                  <button type="button" onClick={() => onCopy(card.content)} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>Copy</button>
+                  <button type="button" onClick={() => onPdf(card.content)} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>PDF</button>
+                </>
+              )}
+              <button type="button" onClick={() => onSave(card)} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>Save to Library</button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// Full-screen quiz. Reuses the same flashcards/quiz player as Study Pack.
+function QuizOverlay({ quiz, c, onClose, onSave, onRetry }) {
+  if (!quiz) return null
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 80, backgroundColor: c.bg, backgroundImage: c.bgGlow, color: c.text, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div style={{ width: '100%', maxWidth: '640px', padding: '1rem 1.2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <button type="button" onClick={onClose} style={styles.iconBtn} aria-label="Close quiz"><BackIcon color={c.text} /></button>
+        <span className="radius-display" style={{ fontWeight: 700, fontSize: '1.05rem' }}>{quiz.title || 'Quiz'}</span>
+        <div style={{ width: '22px' }} />
+      </div>
+      <div style={{ width: '100%', maxWidth: '460px', padding: '0.5rem 1.2rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {quiz.status === 'loading' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: c.subtext, marginTop: '3rem' }}>
+            <Cube3D size={22} />
+            Building your quiz...
+          </div>
+        )}
+        {quiz.status === 'error' && (
+          <div style={{ textAlign: 'center', marginTop: '3rem' }}>
+            <p style={{ color: '#ef4444' }}>{quiz.error}</p>
+            <button type="button" onClick={onRetry} style={{ ...btnPrimary(c), marginTop: '0.8rem' }}>Try again</button>
+          </div>
+        )}
+        {quiz.status === 'ready' && quiz.deck && (
+          <>
+            <StudyDeck deck={quiz.deck} c={c} />
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.6rem' }}>
+              <button type="button" onClick={onSave} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>Save to Library</button>
+              <button type="button" onClick={onRetry} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>New quiz</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---- Project mode ---------------------------------------------------------------
+function fileIsStale(f) {
+  return (f.status === 'pending' || f.status === 'processing') && Date.now() - new Date(f.created_at).getTime() > 4 * 60 * 1000
+}
+
+function ProjectHome({ c, projects, activeProject, files, uploading, projectError, onCreate, onSelect, onLeave, onDeleteProject, onUpload, onRetryFile, onDeleteFile, onSummary, onQuiz, onLikely, onClose }) {
+  const [name, setName] = useState('')
+  const inputRef = useRef(null)
+  const readyCount = files.filter((f) => f.status === 'ready').length
+
+  const create = (e) => {
+    e.preventDefault()
+    const n = name.trim()
+    if (!n) return
+    onCreate(n)
+    setName('')
+  }
+
+  const card = { padding: '0.9rem 1rem', borderRadius: '16px', border: `1px solid ${c.border}`, backgroundColor: c.surface }
+
+  if (!activeProject) {
+    return (
+      <div style={{ textAlign: 'left', width: '100%', maxWidth: '440px', margin: '0 auto' }}>
+        <p className="radius-display" style={{ fontSize: '1.4rem', fontWeight: 700, textAlign: 'center' }}>Project mode</p>
+        <p style={{ color: c.subtext, marginTop: '0.35rem', textAlign: 'center', fontSize: '0.9rem' }}>
+          Upload your notes for a course or topic. RADIUS reads them, then you study from your own material.
+        </p>
+        <form onSubmit={create} style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name a new project, e.g. Thermodynamics"
+            maxLength={60}
+            style={{ flex: 1, minWidth: 0, padding: '0.7rem 0.9rem', borderRadius: '14px', border: `1.5px solid ${c.border}`, backgroundColor: c.surface, color: c.text, fontSize: '0.9rem', outline: 'none' }}
+          />
+          <button type="submit" disabled={!name.trim()} style={{ ...btnPrimary(c), opacity: name.trim() ? 1 : 0.45 }}>Create</button>
+        </form>
+        {projectError && <p style={{ color: '#ef4444', fontSize: '0.82rem', marginTop: '0.6rem' }}>{projectError}</p>}
+        <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+          {projects.length === 0 && <p style={{ color: c.subtext, fontSize: '0.82rem', textAlign: 'center' }}>No projects yet. Create your first one above.</p>}
+          {projects.map((p) => (
+            <div key={p.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer' }} onClick={() => onSelect(p)}>
+              <span style={{ width: '34px', height: '34px', borderRadius: '10px', backgroundColor: c.accentSoft, color: c.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, flexShrink: 0 }}>
+                {(p.name || '?').slice(0, 1).toUpperCase()}
+              </span>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 700 }}>{p.name}</span>
+              <span style={{ color: c.subtext, fontSize: '0.8rem' }}>Open</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ textAlign: 'left', width: '100%', maxWidth: '440px', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ margin: 0, fontSize: '0.74rem', color: c.subtext, fontWeight: 700 }}>PROJECT</p>
+          <p className="radius-display" style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeProject.name}</p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+          <button type="button" onClick={onLeave} style={{ ...styles.chipBtn, padding: '0.4rem 0.8rem', borderColor: c.border, color: c.text }}>Switch</button>
+          {onClose && <button type="button" onClick={onClose} style={{ ...btnPrimary(c), padding: '0.4rem 0.8rem' }}>Done</button>}
+        </div>
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept="application/pdf,image/*,text/plain,.txt,.md"
+        style={{ display: 'none' }}
+        onChange={(e) => { onUpload(e.target.files); e.target.value = '' }}
+      />
+      <div style={{ ...card, marginTop: '0.9rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem' }}>Study material ({files.length})</p>
+          <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} style={{ ...btnPrimary(c), padding: '0.4rem 0.85rem', opacity: uploading ? 0.6 : 1 }}>
+            {uploading ? 'Uploading...' : 'Add files'}
+          </button>
+        </div>
+        <p style={{ margin: '0.35rem 0 0', fontSize: '0.76rem', color: c.subtext }}>PDFs, photos of notes, or text files. Up to 12 MB each.</p>
+        {projectError && <p style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>{projectError}</p>}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginTop: '0.7rem' }}>
+          {files.length === 0 && <p style={{ margin: 0, fontSize: '0.82rem', color: c.subtext }}>Nothing here yet. Add your notes to begin.</p>}
+          {files.map((f) => {
+            const stale = fileIsStale(f)
+            const failed = f.status === 'failed' || stale
+            const working = !failed && f.status !== 'ready'
+            return (
+              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.6rem', borderRadius: '12px', border: `1px solid ${c.border}`, backgroundColor: c.bg }}>
+                <span style={{ fontSize: '0.6rem', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, flexShrink: 0 }}>
+                  {(f.name?.split('.').pop() || 'FILE').toUpperCase().slice(0, 4)}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: '0.84rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</p>
+                  <p style={{ margin: '1px 0 0', fontSize: '0.72rem', color: failed ? '#ef4444' : working ? c.subtext : '#22c55e' }}>
+                    {failed ? (f.error || 'Could not be read') : working ? 'Reading...' : `Ready${f.char_count ? ` · ${Math.max(1, Math.round(f.char_count / 1000))}k characters` : ''}`}
+                  </p>
+                </div>
+                {failed && <button type="button" onClick={() => onRetryFile(f)} style={{ ...styles.chipBtn, padding: '0.25rem 0.6rem', fontSize: '0.74rem', borderColor: c.border, color: c.text }}>Retry</button>}
+                <button type="button" onClick={() => onDeleteFile(f)} aria-label="Remove file" style={{ background: 'none', border: 'none', color: c.subtext, cursor: 'pointer', fontSize: '0.9rem', padding: '0.2rem' }}>✕</button>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ ...card, marginTop: '0.8rem' }}>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem' }}>Study this project</p>
+        <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: c.subtext }}>
+          {readyCount === 0 ? 'Available once at least one file shows Ready. You can also just type a question below.' : 'Or type any question below. RADIUS answers from your files.'}
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginTop: '0.6rem' }}>
+          <button type="button" disabled={readyCount === 0} onClick={() => { onClose?.(); onSummary() }} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text, opacity: readyCount === 0 ? 0.45 : 1 }}>Summarize project</button>
+          <button type="button" disabled={readyCount === 0} onClick={() => { onClose?.(); onQuiz() }} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text, opacity: readyCount === 0 ? 0.45 : 1 }}>Quiz on everything</button>
+          <button type="button" disabled={readyCount === 0} onClick={() => { onClose?.(); onLikely() }} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text, opacity: readyCount === 0 ? 0.45 : 1 }}>Likely exam questions</button>
+        </div>
+      </div>
+
+      <button type="button" onClick={onDeleteProject} style={{ display: 'block', margin: '0.9rem auto 0', background: 'none', border: 'none', color: '#ef4444', fontSize: '0.8rem', cursor: 'pointer' }}>
+        Delete this project
+      </button>
+    </div>
+  )
+}
+
+// ---- Study Library --------------------------------------------------------------
+function LibraryScreen({ theme, accentColor, projects, onBack, onToast }) {
+  const c = getPalette(theme, accentColor)
+  const [items, setItems] = useState(null)
+  const [filter, setFilter] = useState('all')
+  const [openId, setOpenId] = useState(null)
+  const [loadError, setLoadError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('study_library')
+        .select('id, kind, title, content, data, project_id, created_at')
+        .order('created_at', { ascending: false })
+        .limit(200)
+      if (cancelled) return
+      if (error) setLoadError('Could not load your library. Has the latest database update been run?')
+      else setItems(data || [])
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const removeItem = async (item) => {
+    if (!window.confirm('Remove this from your library?')) return
+    setItems((prev) => (prev || []).filter((i) => i.id !== item.id))
+    setOpenId(null)
+    await supabase.from('study_library').delete().eq('id', item.id)
+  }
+
+  const filters = [['all', 'All'], ['quiz', 'Quizzes'], ['summary', 'Summaries'], ['solution', 'Solutions'], ['explain', 'Explanations'], ['hint', 'Hints'], ['note', 'Notes']]
+  const shown = (items || []).filter((i) => filter === 'all' || i.kind === filter)
+  const open = (items || []).find((i) => i.id === openId)
+  const projectName = (id) => (projects || []).find((p) => p.id === id)?.name
+
+  return (
+    <div style={{ ...styles.settingsContainer, backgroundColor: c.bg, backgroundImage: c.bgGlow, color: c.text }}>
+      <div style={styles.topBar}>
+        <button onClick={open ? () => setOpenId(null) : onBack} style={styles.iconBtn}><BackIcon color={c.text} /></button>
+        <span className="radius-display" style={{ fontWeight: 700, fontSize: '1.1rem' }}>{open ? KIND_LABELS[open.kind] || 'Saved' : 'Study Library'}</span>
+        <div style={{ width: '22px' }} />
+      </div>
+
+      {open ? (
+        <div>
+          <p style={{ margin: '0 0 0.2rem', fontWeight: 800, fontSize: '1.05rem' }}>{open.title}</p>
+          <p style={{ margin: '0 0 0.8rem', fontSize: '0.76rem', color: c.subtext }}>
+            {new Date(open.created_at).toLocaleDateString()}{open.project_id && projectName(open.project_id) ? ` · ${projectName(open.project_id)}` : ''}
+          </p>
+          {open.data && <div style={{ display: 'flex', justifyContent: 'center' }}><StudyDeck deck={open.data} c={c} /></div>}
+          {open.content && (
+            <div style={{ padding: '0.9rem 1rem', borderRadius: '16px', border: `1px solid ${c.border}`, backgroundColor: c.surface }}>
+              <MarkdownBlock text={open.content} c={c} />
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.9rem' }}>
+            {open.content && (
+              <button type="button" onClick={() => { navigator.clipboard?.writeText(open.content); onToast('Copied') }} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>Copy</button>
+            )}
+            <button type="button" onClick={() => removeItem(open)} style={{ ...styles.chipBtn, borderColor: '#ef4444', color: '#ef4444' }}>Remove</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: '0.4rem', overflowX: 'auto', paddingBottom: '0.6rem' }}>
+            {filters.map(([v, l]) => (
+              <button key={v} type="button" onClick={() => setFilter(v)} style={{ ...styles.modeBtn, flexShrink: 0, whiteSpace: 'nowrap', backgroundColor: filter === v ? c.accent : 'transparent', backgroundImage: filter === v ? c.accentGrad : 'none', color: filter === v ? c.accentText : c.subtext, borderColor: c.border }}>{l}</button>
+            ))}
+          </div>
+          {loadError && <p style={{ color: '#ef4444', fontSize: '0.85rem' }}>{loadError}</p>}
+          {items === null && !loadError && <p style={{ color: c.subtext, fontSize: '0.85rem' }}>Loading...</p>}
+          {items !== null && shown.length === 0 && (
+            <p style={{ color: c.subtext, fontSize: '0.88rem', textAlign: 'center', marginTop: '2rem' }}>
+              {items.length === 0 ? 'Nothing saved yet. Tap Save to Library on a quiz, summary, hint, solution or any reply.' : 'Nothing in this filter.'}
+            </p>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+            {shown.map((item) => (
+              <div key={item.id} onClick={() => setOpenId(item.id)} style={{ padding: '0.8rem 0.95rem', borderRadius: '16px', border: `1px solid ${c.border}`, backgroundColor: c.surface, cursor: 'pointer' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.66rem', fontWeight: 800, padding: '2px 8px', borderRadius: '10px', backgroundColor: c.accentSoft, color: c.accent }}>{KIND_LABELS[item.kind] || 'Note'}</span>
+                  <span style={{ fontSize: '0.72rem', color: c.subtext }}>{new Date(item.created_at).toLocaleDateString()}</span>
+                  {item.project_id && projectName(item.project_id) && <span style={{ fontSize: '0.72rem', color: c.subtext, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {projectName(item.project_id)}</span>}
+                </div>
+                <p style={{ margin: '0.4rem 0 0', fontWeight: 700, fontSize: '0.92rem' }}>{item.title}</p>
+                {item.content && (
+                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: c.subtext, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {item.content.replace(/[#*_`>|$\\]/g, '').replace(/\s+/g, ' ').slice(0, 160)}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---- Notifications (Settings card) ------------------------------------------------
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(base64)
+  const out = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+  return out
+}
+
+function NotificationsCard({ c, session }) {
+  const vapid = import.meta.env.VITE_VAPID_PUBLIC_KEY
+  const supported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+  const isIos = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent)
+  const standalone = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true)
+  const [permission, setPermission] = useState(supported ? Notification.permission : 'denied')
+  const [subscribed, setSubscribed] = useState(false)
+  const [replies, setReplies] = useState(true)
+  const [reminders, setReminders] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+
+  useEffect(() => {
+    if (!supported) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready
+        const sub = await reg.pushManager.getSubscription()
+        if (cancelled) return
+        setSubscribed(!!sub)
+        if (sub) {
+          const { data } = await supabase.from('push_subscriptions').select('notify_replies, notify_reminders').eq('endpoint', sub.endpoint).maybeSingle()
+          if (!cancelled && data) {
+            setReplies(data.notify_replies !== false)
+            setReminders(data.notify_reminders !== false)
+          }
+        }
+      } catch (e) { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [supported])
+
+  const enable = async () => {
+    setBusy(true)
+    setNote('')
+    try {
+      if (!vapid) throw new Error('Notifications are not set up on the server yet.')
+      const perm = await Notification.requestPermission()
+      setPermission(perm)
+      if (perm !== 'granted') throw new Error('Notifications are blocked. Allow them for RADIUS in your browser or phone settings.')
+      const reg = await navigator.serviceWorker.ready
+      let sub = await reg.pushManager.getSubscription()
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapid) })
+      const json = sub.toJSON()
+      const { error } = await supabase.from('push_subscriptions').upsert(
+        { user_id: session.user.id, endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth, notify_replies: true, notify_reminders: true, user_agent: (navigator.userAgent || '').slice(0, 200) },
+        { onConflict: 'endpoint' }
+      )
+      if (error) throw new Error('Could not save this device. Has the latest database update been run?')
+      setSubscribed(true)
+      setReplies(true)
+      setReminders(true)
+      localStorage.setItem('radius-notify-replies', 'true')
+    } catch (e) {
+      setNote(e.message || 'Could not turn notifications on.')
+    }
+    setBusy(false)
+  }
+
+  const disable = async () => {
+    setBusy(true)
+    try {
+      const reg = await navigator.serviceWorker.ready
+      const sub = await reg.pushManager.getSubscription()
+      if (sub) {
+        await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+        await sub.unsubscribe()
+      }
+      setSubscribed(false)
+    } catch (e) {
+      setNote('Could not turn notifications off. Try again.')
+    }
+    setBusy(false)
+  }
+
+  const setPref = async (field, value) => {
+    if (field === 'notify_replies') { setReplies(value); localStorage.setItem('radius-notify-replies', String(value)) }
+    else setReminders(value)
+    try {
+      const reg = await navigator.serviceWorker.ready
+      const sub = await reg.pushManager.getSubscription()
+      if (sub) await supabase.from('push_subscriptions').update({ [field]: value }).eq('endpoint', sub.endpoint)
+    } catch (e) { /* ignore */ }
+  }
+
+  const sendTest = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready
+      await reg.showNotification('RADIUS notifications work', { body: 'You will see alerts like this when your answers are ready.', icon: '/logo.png', badge: '/logo.png', tag: 'radius-test' })
+    } catch (e) {
+      setNote('Could not show a test notification.')
+    }
+  }
+
+  const switchRow = (label, hint, value, onChange) => (
+    <div onClick={() => onChange(!value)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginTop: '0.8rem', gap: '0.8rem' }}>
+      <div>
+        <p style={{ margin: 0, fontSize: '0.9rem', color: c.text }}>{label}</p>
+        <p style={{ margin: '0.2rem 0 0', fontSize: '0.76rem', color: c.subtext }}>{hint}</p>
+      </div>
+      <div style={{ width: '46px', height: '26px', borderRadius: '13px', backgroundColor: value ? c.accent : c.surfaceAlt, position: 'relative', flexShrink: 0, transition: 'background-color 0.2s' }}>
+        <div style={{ position: 'absolute', top: '3px', left: value ? '23px' : '3px', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#fff', transition: 'left 0.2s' }} />
+      </div>
+    </div>
+  )
+
+  return (
+    <SettingsCard c={c}>
+      <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '0 0 0.6rem' }}>NOTIFICATIONS</p>
+      {!supported ? (
+        <p style={{ margin: 0, fontSize: '0.85rem', color: c.subtext }}>
+          {isIos && !standalone ? 'On iPhone, add RADIUS to your home screen first (Share, then Add to Home Screen), then open it from there to turn notifications on.' : 'This browser does not support notifications.'}
+        </p>
+      ) : !subscribed ? (
+        <>
+          <p style={{ margin: 0, fontSize: '0.88rem', color: c.text }}>Get told when your answer is ready, even if RADIUS is minimised, plus a streak reminder.</p>
+          {isIos && !standalone && <p style={{ margin: '0.5rem 0 0', fontSize: '0.78rem', color: c.subtext }}>On iPhone this only works from the home screen app.</p>}
+          <button type="button" disabled={busy || permission === 'denied'} onClick={enable} style={{ ...btnPrimary(c), marginTop: '0.8rem', opacity: busy || permission === 'denied' ? 0.5 : 1 }}>
+            {busy ? 'Turning on...' : 'Turn on notifications'}
+          </button>
+          {permission === 'denied' && <p style={{ margin: '0.5rem 0 0', fontSize: '0.78rem', color: '#ef4444' }}>Blocked in your browser settings. Allow notifications for this site, then come back.</p>}
+        </>
+      ) : (
+        <>
+          <p style={{ margin: 0, fontSize: '0.88rem', color: '#22c55e', fontWeight: 700 }}>Notifications are on for this device</p>
+          {switchRow('Answer ready', 'When RADIUS finishes while you are in another app', replies, (v) => setPref('notify_replies', v))}
+          {switchRow('Streak reminders', 'A daily nudge if your streak is about to end', reminders, (v) => setPref('notify_reminders', v))}
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.9rem' }}>
+            <button type="button" onClick={sendTest} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>Send a test</button>
+            <button type="button" disabled={busy} onClick={disable} style={{ ...styles.chipBtn, borderColor: c.border, color: c.subtext }}>Turn off</button>
+          </div>
+        </>
+      )}
+      {note && <p style={{ margin: '0.6rem 0 0', fontSize: '0.8rem', color: '#ef4444' }}>{note}</p>}
+    </SettingsCard>
+  )
+}
+
 function Dashboard({ session }) {
   const [view, setView] = useState('main')
   const [themePreference, setThemePreference] = useState(() => localStorage.getItem('radius-theme') || 'dark')
@@ -1990,9 +2775,33 @@ function Dashboard({ session }) {
   const [listening, setListening] = useState(false)
   const recognitionRef = useRef(null)
   const voiceStopRef = useRef(false)
+  // Quick actions, Project mode, Study Library, background recovery
+  const [actionPanel, setActionPanel] = useState(null)
+  const [explainOpts, setExplainOpts] = useState({ scope: 'all', part: null, how: 'simple' })
+  const [quizOpts, setQuizOpts] = useState({ count: 5, difficulty: 'medium', type: 'mcq' })
+  const [hintLevel, setHintLevel] = useState(0)
+  const [tempCards, setTempCards] = useState([])
+  const [tempBusy, setTempBusy] = useState(false)
+  const [quizOverlay, setQuizOverlay] = useState(null)
+  const [toast, setToast] = useState('')
+  const [statusNote, setStatusNote] = useState('')
+  const [projects, setProjects] = useState([])
+  const [activeProject, setActiveProject] = useState(null)
+  const [projectFiles, setProjectFiles] = useState([])
+  const [projectManagerOpen, setProjectManagerOpen] = useState(false)
+  const [projectUploading, setProjectUploading] = useState(false)
+  const [projectError, setProjectError] = useState('')
+  const toastTimerRef = useRef(null)
+  const activeConvRef = useRef(null)
+  const activeProjectRef = useRef(null)
+  const conversationsRef = useRef([])
+  const openByIdRef = useRef(null)
 
   const c = getPalette(theme, accentColor)
   const displayName = profile?.nickname || session.user.user_metadata?.full_name || session.user.email.split('@')[0]
+  activeConvRef.current = activeConversationId
+  activeProjectRef.current = activeProject
+  conversationsRef.current = conversations
   const messagesEndRef = useRef(null)
   const textAreaRef = useRef(null)
   const photosInputRef = useRef(null)
@@ -2005,6 +2814,48 @@ function Dashboard({ session }) {
   useEffect(() => {
     loadConversations()
     loadProfile()
+    loadProjects()
+  }, [])
+
+  // Files of the open project, refreshed while any of them is still being read.
+  useEffect(() => {
+    if (!activeProject) { setProjectFiles([]); return }
+    loadProjectFiles(activeProject.id)
+  }, [activeProject?.id])
+
+  useEffect(() => {
+    if (!activeProject) return
+    const waiting = projectFiles.some((f) => (f.status === 'pending' || f.status === 'processing') && !fileIsStale(f))
+    if (!waiting) return
+    const timer = setInterval(() => loadProjectFiles(activeProject.id), 5000)
+    return () => clearInterval(timer)
+  }, [activeProject?.id, projectFiles])
+
+  // Notification taps: open the chat the notification was about.
+  useEffect(() => {
+    const fromUrl = () => {
+      try {
+        const id = new URLSearchParams(window.location.search).get('open')
+        if (id) {
+          window.history.replaceState({}, '', window.location.pathname)
+          return id
+        }
+      } catch (e) { /* ignore */ }
+      return null
+    }
+    const first = fromUrl()
+    if (first) setTimeout(() => openByIdRef.current?.(first), 600)
+    const onMessage = (event) => {
+      const data = event.data
+      if (data && data.type === 'radius-open' && typeof data.url === 'string') {
+        try {
+          const id = new URL(data.url, window.location.origin).searchParams.get('open')
+          if (id) openByIdRef.current?.(id)
+        } catch (e) { /* ignore */ }
+      }
+    }
+    navigator.serviceWorker?.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker?.removeEventListener('message', onMessage)
   }, [])
 
   useEffect(() => {
@@ -2126,11 +2977,6 @@ function Dashboard({ session }) {
     requestAnimationFrame(() => formRef.current?.requestSubmit())
   }
 
-  function handleRegenerateLast() {
-    const lastUser = [...messages].reverse().find((m) => m.role === 'user')
-    if (lastUser) handleQuickAction(lastUser.content)
-  }
-
   async function handleSetFeedback(messageId, value) {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, feedback: value } : m)))
     // Best-effort only: skips messages that haven't round-tripped to the DB yet
@@ -2249,8 +3095,16 @@ function Dashboard({ session }) {
   async function loadConversations() {
     let { data, error } = await supabase
       .from('conversations')
-      .select('id, title, mode, subject, updated_at, is_pinned')
+      .select('id, title, mode, subject, updated_at, is_pinned, project_id')
       .order('updated_at', { ascending: false })
+    if (error) {
+      const noProject = await supabase
+        .from('conversations')
+        .select('id, title, mode, subject, updated_at, is_pinned')
+        .order('updated_at', { ascending: false })
+      data = noProject.data
+      error = noProject.error
+    }
     if (error) {
       // `is_pinned` likely doesn't exist on the live table yet — fall back
       // so the whole history list doesn't silently disappear because of it.
@@ -2284,7 +3138,18 @@ function Dashboard({ session }) {
     setSidebarOpen(false)
     setActiveConversationId(conv.id)
     setMode(conv.mode || 'calculative')
-    setTool('chat')
+    const convProject = conv.project_id ? projects.find((pr) => pr.id === conv.project_id) : null
+    if (convProject) {
+      setTool('project')
+      setActiveProject(convProject)
+      localStorage.setItem('radius-active-project', convProject.id)
+    } else {
+      setTool('chat')
+    }
+    setTempCards([])
+    setActionPanel(null)
+    setHintLevel(0)
+    setStatusNote('')
     setReplyTo(null)
     setSubject(conv.subject || '')
     setError('')
@@ -2293,10 +3158,17 @@ function Dashboard({ session }) {
       .select('id, role, content, created_at')
       .eq('conversation_id', conv.id)
       .order('created_at', { ascending: true })
-    if (!error) setMessages(data || [])
+    if (!error) setMessages(visibleRows(data))
   }
+  openByIdRef.current = openConversationById
 
   function handleNewChat() {
+    setTempCards([])
+    setActionPanel(null)
+    setHintLevel(0)
+    setQuizOverlay(null)
+    setStatusNote('')
+    setProjectManagerOpen(false)
     setReplyTo(null)
     setActiveConversationId(null)
     setMessages([])
@@ -2425,19 +3297,44 @@ function Dashboard({ session }) {
   // ---- Ask the backend for a reply, streaming it in as it is written ----
   // Kept separate from handleSubmit so the Retry button can run it again with
   // the same payload, without re-uploading files or duplicating the question.
+  // Also used by the quick actions that save into the chat (Regenerate,
+  // Explain, Show solution): they pass `action`, and Regenerate passes
+  // `replaceId` so the new answer takes the old one's place.
   async function requestReply(payload) {
-    const { conversationId, userText, filesForApi, history } = payload
+    const { conversationId, userText, filesForApi, history, action = null, replaceId = null, kind = null } = payload
     setRetryPayload(null)
     setError('')
+    setStatusNote('')
     setLoading(true)
     setStreaming(false)
+    setTempCards([])
+    setActionPanel(null)
+    setHintLevel(0)
 
     const controller = new AbortController()
     abortControllerRef.current = controller
+    const startedAt = new Date(Date.now() - 2000).toISOString()
+    let lastActivity = Date.now()
+    let stalled = false
+    // If the phone was asleep and the connection quietly died, nothing arrives
+    // any more. After 40 silent seconds with the app open, give up on it and
+    // fetch the saved answer from the chat instead.
+    const watchdog = setInterval(() => {
+      if (document.visibilityState === 'visible' && Date.now() - lastActivity > 40000) {
+        stalled = true
+        try { controller.abort() } catch (e) { /* ignore */ }
+      }
+    }, 5000)
 
     const streamId = `temp-a-${Date.now()}`
     let streamText = ''
     let placeholderAdded = false
+    const swapIn = (content, responseType, extra) => {
+      setMessages((prev) => {
+        const base = replaceId ? prev.filter((m) => m.id !== replaceId) : prev
+        return [...base, { id: streamId, role: 'assistant', content, responseType, ...(extra || {}) }]
+      })
+    }
     const removePlaceholder = () => {
       if (placeholderAdded) {
         setMessages((prev) => prev.filter((m) => m.id !== streamId))
@@ -2446,16 +3343,36 @@ function Dashboard({ session }) {
     }
 
     const finish = async (result, responseType) => {
+      const stored = kind ? `<!--KIND:${kind}-->\n${result}` : result
       if (placeholderAdded) {
-        setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: result, responseType } : m)))
+        setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: stored, responseType, fresh: true } : m)))
       } else {
         placeholderAdded = true
-        setMessages((prev) => [...prev, { id: streamId, role: 'assistant', content: result, responseType }])
+        swapIn(stored, responseType, { fresh: true })
       }
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: result })
+      // For Regenerate: find the old saved answer first, save the new one,
+      // then remove the old one, so a failure never leaves the chat empty.
+      let oldRowId = null
+      if (replaceId) {
+        try {
+          const { data: rows } = await supabase
+            .from('messages')
+            .select('id')
+            .eq('conversation_id', conversationId)
+            .eq('role', 'assistant')
+            .order('created_at', { ascending: false })
+            .limit(1)
+          oldRowId = rows && rows[0] ? rows[0].id : null
+        } catch (e) { /* best-effort */ }
+      }
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: stored })
+      if (oldRowId) {
+        try { await supabase.from('messages').delete().eq('id', oldRowId) } catch (e) { /* best-effort */ }
+      }
       loadConversations()
       touchStreak()
       fetchUsage()
+      notifyLocal()
     }
 
     try {
@@ -2475,6 +3392,11 @@ function Dashboard({ session }) {
           nickname: profile?.nickname || null,
           responseStyle: profile?.response_style || 'balanced',
           stream: true,
+          action: action || undefined,
+          projectId: tool === 'project' ? activeProject?.id : undefined,
+          conversationId,
+          kind: kind || undefined,
+          replaceLast: !!replaceId,
         }),
         signal: controller.signal,
       })
@@ -2504,7 +3426,7 @@ function Dashboard({ session }) {
             if (!placeholderAdded) {
               placeholderAdded = true
               setStreaming(true)
-              setMessages((prev) => [...prev, { id: streamId, role: 'assistant', content: shown }])
+              swapIn(shown)
             } else {
               setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: shown } : m)))
             }
@@ -2523,6 +3445,7 @@ function Dashboard({ session }) {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
+          lastActivity = Date.now()
           buffer += decoder.decode(value, { stream: true })
           const lines = buffer.split('\n')
           buffer = lines.pop()
@@ -2535,16 +3458,36 @@ function Dashboard({ session }) {
         await finish(finalResult, finalType)
       }
     } catch (err) {
-      if (err.name === 'AbortError') {
+      const looksLikeDrop = err instanceof TypeError || /cut off|network|load failed|failed to fetch/i.test(err.message || '')
+      if (err.name === 'AbortError' && !stalled) {
         // The student pressed stop: keep whatever text had already arrived.
         const partial = cleanStreamText(streamText)
         if (partial && placeholderAdded) {
           try {
+            let oldRowId = null
+            if (replaceId) {
+              const { data: rows } = await supabase.from('messages').select('id').eq('conversation_id', conversationId).eq('role', 'assistant').order('created_at', { ascending: false }).limit(1)
+              oldRowId = rows && rows[0] ? rows[0].id : null
+            }
             await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: partial })
+            if (oldRowId) await supabase.from('messages').delete().eq('id', oldRowId)
             loadConversations()
           } catch (e) { /* best-effort */ }
         } else {
           removePlaceholder()
+          try {
+            await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: STOP_MARKER })
+          } catch (e) { /* best-effort */ }
+        }
+      } else if ((stalled || looksLikeDrop) && conversationId) {
+        // The connection dropped (phone asleep, app switched). The server keeps
+        // writing the answer and saves it into the chat, so wait for it.
+        removePlaceholder()
+        setStreaming(false)
+        const recovered = await recoverReply(conversationId, startedAt)
+        if (!recovered) {
+          setError('The connection dropped before the answer finished. Tap Retry.')
+          setRetryPayload(payload)
         }
       } else {
         removePlaceholder()
@@ -2552,6 +3495,7 @@ function Dashboard({ session }) {
         setRetryPayload(payload)
       }
     }
+    clearInterval(watchdog)
     abortControllerRef.current = null
     setStreaming(false)
     setLoading(false)
@@ -2561,12 +3505,86 @@ function Dashboard({ session }) {
     if (retryPayload && !loading) requestReply(retryPayload)
   }
 
+  // After a dropped connection: check the chat every few seconds for the
+  // answer the server saved on its own, then show it.
+  async function recoverReply(conversationId, sinceIso) {
+    setStatusNote('Reconnecting to your answer...')
+    for (let i = 0; i < 25; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+      if (activeConvRef.current !== conversationId) {
+        setStatusNote('')
+        return true
+      }
+      try {
+        const { data } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversationId)
+          .eq('role', 'assistant')
+          .gt('created_at', sinceIso)
+          .limit(1)
+        if (data && data.length) {
+          await reloadMessages(conversationId, true)
+          loadConversations()
+          touchStreak()
+          setStatusNote('')
+          return true
+        }
+      } catch (e) { /* try again */ }
+    }
+    setStatusNote('')
+    return false
+  }
+
+  async function reloadMessages(conversationId, markLast) {
+    const { data, error: loadError } = await supabase
+      .from('messages')
+      .select('id, role, content, created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+    if (loadError || !data) return
+    if (activeConvRef.current !== conversationId) return
+    const rows = visibleRows(data)
+    setMessages(
+      rows.map((m, i) =>
+        markLast && i === rows.length - 1 && m.role === 'assistant' ? { ...m, responseType: 'assignment', fresh: true } : m
+      )
+    )
+  }
+
+  // A small system notification when the answer finished while RADIUS was in
+  // the background (works while the page is still alive; the server push
+  // covers the case where the phone froze the page).
+  async function notifyLocal() {
+    try {
+      if (document.visibilityState === 'visible') return
+      if (!('Notification' in window) || Notification.permission !== 'granted') return
+      if (localStorage.getItem('radius-notify-replies') === 'false') return
+      const reg = await navigator.serviceWorker?.ready
+      if (!reg) return
+      await reg.showNotification('Your answer is ready', {
+        body: 'RADIUS finished your question. Tap to read it.',
+        icon: '/logo.png',
+        badge: '/logo.png',
+        tag: 'radius-reply',
+        data: { url: '/' },
+      })
+    } catch (e) { /* best-effort */ }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!assignmentText.trim() && attachedFiles.length === 0) return
+    if (tool === 'project' && !activeProject) {
+      setError('Pick or create a project first, then ask your question.')
+      return
+    }
 
     stopListening()
     setRetryPayload(null)
+    setTempCards([])
+    setActionPanel(null)
+    setHintLevel(0)
     setLoading(true)
     setError('')
 
@@ -2583,11 +3601,15 @@ function Dashboard({ session }) {
 
       if (!conversationId) {
         const title = (userText || 'Image assignment').slice(0, 60)
-        const { data: newConv, error: convError } = await supabase
-          .from('conversations')
-          .insert({ user_id: session.user.id, title, mode, subject: subject || null })
-          .select()
-          .single()
+        const convRow = { user_id: session.user.id, title, mode, subject: subject || null }
+        if (tool === 'project' && activeProject) convRow.project_id = activeProject.id
+        let { data: newConv, error: convError } = await supabase.from('conversations').insert(convRow).select().single()
+        if (convError && convRow.project_id && /project_id/i.test(convError.message || '')) {
+          delete convRow.project_id
+          const retry = await supabase.from('conversations').insert(convRow).select().single()
+          newConv = retry.data
+          convError = retry.error
+        }
         if (convError) throw new Error(convError.message)
         conversationId = newConv.id
         setActiveConversationId(conversationId)
@@ -2656,7 +3678,7 @@ function Dashboard({ session }) {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userContent })
       fetchUsage()
 
-      const history = messages.map((m) => ({ role: m.role, content: splitStudy(m.content).text }))
+      const history = buildHistory(messages)
 
       await requestReply({ conversationId, userText: textForModel, filesForApi, history })
     } catch (err) {
@@ -2672,12 +3694,350 @@ function Dashboard({ session }) {
     setLoading(false)
   }
 
+  // ---- Toast ----
+  function showToast(text) {
+    setToast(text)
+    clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = setTimeout(() => setToast(''), 2200)
+  }
+
+  // ---- Study Library ----
+  async function saveToLibrary({ kind, title, content, data }) {
+    const clean = (title || 'Saved item').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Saved item'
+    const row = { user_id: session.user.id, kind, title: clean, content: content || '', data: data || null, project_id: tool === 'project' && activeProject ? activeProject.id : null }
+    let { error: saveError } = await supabase.from('study_library').insert(row)
+    if (saveError && /project_id/i.test(saveError.message || '')) {
+      delete row.project_id
+      saveError = (await supabase.from('study_library').insert(row)).error
+    }
+    if (saveError) showToast('Could not save. Has the latest database update been run?')
+    else showToast('Saved to Study Library')
+  }
+
+  function titleFrom(text, fallback) {
+    const line = (text || '').replace(/^#+\s*/gm, '').split('\n').map((l) => l.replace(/[*_`>|$]/g, '').trim()).find((l) => l.length > 3)
+    return (line || fallback).slice(0, 70)
+  }
+
+  function lastQuestionText() {
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+    return stripAttachmentMarkdown(lastUser?.content || '')
+  }
+
+  function handleSaveMessage(text, kind, deck) {
+    const k = deck ? 'quiz' : kind || 'note'
+    saveToLibrary({ kind: k, title: titleFrom(text, deck ? 'Study pack' : `Reply: ${lastQuestionText().slice(0, 50) || 'saved'}`), content: text, data: deck || null })
+  }
+
+  function handleSaveTemp(card) {
+    saveToLibrary({ kind: card.kind, title: titleFrom(card.content, card.kind === 'hint' ? `Hint: ${lastQuestionText().slice(0, 50)}` : 'Summary'), content: card.content })
+  }
+
+  // ---- Quick actions under a reply (each has its own behaviour) ----
+  const lastMsg = messages[messages.length - 1]
+  const lastKind = lastMsg && lastMsg.role === 'assistant' ? splitStudy(lastMsg.content).kind : null
+
+  function explainParts() {
+    if (!lastMsg || lastMsg.role !== 'assistant') return []
+    const text = splitStudy(lastMsg.content).text
+    return text
+      .split('\n')
+      .map((l) => l.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').replace(/[*_`#>|]/g, '').replace(/\s+/g, ' ').trim())
+      .filter((l) => l.length >= 14 && !/^\$\$?\s*$/.test(l))
+      .slice(0, 10)
+      .map((l) => ({ short: l.length > 80 ? l.slice(0, 80).trimEnd() + '...' : l, full: l.slice(0, 300) }))
+  }
+
+  async function runSilentAction(action, extra) {
+    if (loading || !activeConversationId || !lastMsg) return
+    await requestReply({
+      conversationId: activeConversationId,
+      userText: extra.userText,
+      filesForApi: [],
+      history: buildHistory(messages),
+      action,
+      kind: extra.kind || null,
+    })
+  }
+
+  async function handleRegen(change) {
+    if (loading || !activeConversationId) return
+    const idx = messages.length - 1
+    const last = messages[idx]
+    if (!last || last.role !== 'assistant') return
+    let ui = idx - 1
+    while (ui >= 0 && messages[ui].role !== 'user') ui--
+    if (ui < 0) return
+    const userMsg = messages[ui]
+    await requestReply({
+      conversationId: activeConversationId,
+      userText: stripAttachmentMarkdown(userMsg.content),
+      filesForApi: extractFilesFromContent(userMsg.content),
+      history: buildHistory(messages.slice(0, ui)),
+      action: { kind: 'regen', change },
+      replaceId: last.id,
+    })
+  }
+
+  function handleExplain() {
+    const opts = explainOpts
+    runSilentAction(
+      { kind: 'explain', scope: opts.scope, part: opts.part || '', how: opts.how },
+      { userText: 'Please explain that.', kind: 'explain' }
+    )
+  }
+
+  function handleSolution() {
+    runSilentAction({ kind: 'solution' }, { userText: 'Please show the complete worked solution.', kind: 'solution' })
+  }
+
+  // One request that does not touch the chat history (hints, summaries, quizzes).
+  async function generateOnce(action, userText) {
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({
+        subject,
+        mode,
+        tool,
+        assignmentText: userText,
+        history: buildHistory(messages),
+        nickname: profile?.nickname || null,
+        responseStyle: profile?.response_style || 'balanced',
+        action,
+        projectId: tool === 'project' ? activeProject?.id : undefined,
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'Something went wrong.')
+    return data
+  }
+
+  async function handleHint() {
+    if (tempBusy || loading) return
+    if (hintLevel >= 3) { showToast('That was the last hint. Try Show solution.'); return }
+    const level = Math.min(3, hintLevel + 1)
+    const convAtStart = activeConvRef.current
+    setTempBusy(true)
+    setError('')
+    try {
+      const data = await generateOnce({ kind: 'hint', level }, 'Please give me a hint.')
+      if (activeConvRef.current !== convAtStart) return
+      const text = splitStudy(data.result).text
+      setHintLevel(level)
+      setTempCards((prev) => [...prev, { id: `hint-${Date.now()}`, kind: 'hint', title: `Hint ${level} of 3`, content: text }])
+    } catch (e) {
+      setError(e.message || 'Could not get a hint. Try again.')
+    }
+    setTempBusy(false)
+  }
+
+  async function handleSummary(wholeProject) {
+    if (tempBusy || loading) return
+    const convAtStart = activeConvRef.current
+    setTempBusy(true)
+    setError('')
+    try {
+      const data = await generateOnce({ kind: 'summary', wholeProject: !!wholeProject }, wholeProject ? 'Summarize all of my project material.' : 'Please summarize this topic.')
+      if (activeConvRef.current !== convAtStart) return
+      const text = splitStudy(data.result).text
+      setTempCards((prev) => [...prev, { id: `sum-${Date.now()}`, kind: 'summary', title: wholeProject ? `Summary: ${activeProject?.name || 'project'}` : 'Summary', content: text }])
+    } catch (e) {
+      setError(e.message || 'Could not make the summary. Try again.')
+    }
+    setTempBusy(false)
+  }
+
+  async function handleQuiz(wholeProject, overrides) {
+    const opts = { ...quizOpts, ...(overrides || {}) }
+    setActionPanel(null)
+    const title = wholeProject && activeProject ? `Quiz: ${activeProject.name}` : 'Quiz'
+    setQuizOverlay({ status: 'loading', deck: null, title, redo: () => handleQuiz(wholeProject, overrides) })
+    try {
+      const data = await generateOnce({ kind: 'quiz', count: opts.count, difficulty: opts.difficulty, type: opts.type, wholeProject: !!wholeProject }, 'Please quiz me.')
+      const { deck } = splitStudy(data.result)
+      if (!deck) throw new Error('The quiz could not be built this time. Try again.')
+      setQuizOverlay((prev) => (prev ? { ...prev, status: 'ready', deck } : prev))
+    } catch (e) {
+      setQuizOverlay((prev) => (prev ? { ...prev, status: 'error', error: e.message || 'Something went wrong.' } : prev))
+    }
+  }
+
+  function handleSaveQuiz() {
+    if (!quizOverlay?.deck) return
+    saveToLibrary({ kind: 'quiz', title: `${quizOverlay.title}: ${titleFrom(lastQuestionText(), 'practice').slice(0, 40)}`, content: '', data: quizOverlay.deck })
+  }
+
+  // ---- Projects ----
+  async function loadProjects() {
+    try {
+      const { data, error: projError } = await supabase.from('projects').select('id, name, created_at').order('created_at', { ascending: false })
+      if (projError) return
+      setProjects(data || [])
+      const savedId = localStorage.getItem('radius-active-project')
+      if (savedId) {
+        const found = (data || []).find((p) => p.id === savedId)
+        if (found) setActiveProject((prev) => prev || found)
+      }
+    } catch (e) { /* projects table may not exist yet */ }
+  }
+
+  async function loadProjectFiles(projectId) {
+    if (!projectId) { setProjectFiles([]); return }
+    const { data } = await supabase
+      .from('project_files')
+      .select('id, name, mime_type, storage_path, status, error, char_count, created_at')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: true })
+    if (activeProjectRef.current && activeProjectRef.current.id === projectId) setProjectFiles(data || [])
+  }
+
+  async function handleCreateProject(name) {
+    setProjectError('')
+    const { data, error: createError } = await supabase.from('projects').insert({ user_id: session.user.id, name }).select('id, name, created_at').single()
+    if (createError || !data) {
+      setProjectError('Could not create the project. Has the latest database update been run?')
+      return
+    }
+    setProjects((prev) => [data, ...prev])
+    handleSelectProject(data)
+  }
+
+  function handleSelectProject(p) {
+    setProjectError('')
+    setActiveProject(p)
+    if (p) localStorage.setItem('radius-active-project', p.id)
+    else localStorage.removeItem('radius-active-project')
+    // A different project means a fresh chat.
+    if (p && activeConversationId) {
+      setActiveConversationId(null)
+      setMessages([])
+    }
+  }
+
+  async function handleDeleteProject() {
+    if (!activeProject) return
+    if (!window.confirm(`Delete "${activeProject.name}" and all its files? Chats stay, but they lose their link to the project.`)) return
+    const proj = activeProject
+    try {
+      const paths = projectFiles.map((f) => f.storage_path).filter(Boolean)
+      if (paths.length) await supabase.storage.from('assignment-images').remove(paths)
+      await supabase.from('project_files').delete().eq('project_id', proj.id)
+      await supabase.from('projects').delete().eq('id', proj.id)
+    } catch (e) { /* best-effort */ }
+    setProjects((prev) => prev.filter((p) => p.id !== proj.id))
+    setProjectManagerOpen(false)
+    handleSelectProject(null)
+  }
+
+  async function runExtract(fileId) {
+    try {
+      const response = await fetch('/api/project-extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ fileId }),
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        return data.error || 'Could not read this file.'
+      }
+      return null
+    } catch (e) {
+      return 'Network problem while reading this file.'
+    }
+  }
+
+  async function handleUploadProjectFiles(fileList) {
+    const files = Array.from(fileList || [])
+    if (!files.length || !activeProject) return
+    const projectId = activeProject.id
+    setProjectError('')
+    setProjectUploading(true)
+    const problems = []
+    for (const file of files.slice(0, 10)) {
+      try {
+        const lowerName = (file.name || '').toLowerCase()
+        let mime = file.type
+        if (!mime && lowerName.endsWith('.md')) mime = 'text/markdown'
+        if (!mime && lowerName.endsWith('.txt')) mime = 'text/plain'
+        const okType = mime === 'application/pdf' || mime.startsWith('image/') || mime === 'text/plain' || mime === 'text/markdown'
+        if (!okType) { problems.push(`"${file.name}" is not a PDF, photo or text file.`); continue }
+        let blob = file
+        if (mime.startsWith('image/')) {
+          const compressed = await compressImage(file)
+          blob = await (await fetch(`data:${compressed.mimeType};base64,${compressed.base64}`)).blob()
+          mime = compressed.mimeType
+        }
+        if (blob.size > 12 * 1024 * 1024) { problems.push(`"${file.name}" is over 12 MB.`); continue }
+        const ext = mime === 'application/pdf' ? 'pdf' : mime === 'text/plain' ? 'txt' : mime === 'text/markdown' ? 'md' : (mime.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
+        const path = `${session.user.id}/proj-${projectId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const { error: uploadError } = await supabase.storage.from('assignment-images').upload(path, blob, { contentType: mime })
+        if (uploadError) { problems.push(`"${file.name}" did not upload: ${uploadError.message}`); continue }
+        const { data: row, error: rowError } = await supabase
+          .from('project_files')
+          .insert({ project_id: projectId, user_id: session.user.id, name: file.name || 'file', mime_type: mime, storage_path: path, status: 'pending' })
+          .select('id')
+          .single()
+        if (rowError || !row) { problems.push(`"${file.name}" could not be added.`); continue }
+        await loadProjectFiles(projectId)
+        const failure = await runExtract(row.id)
+        if (failure) problems.push(`"${file.name}": ${failure}`)
+        await loadProjectFiles(projectId)
+      } catch (e) {
+        problems.push(`"${file.name}" could not be added.`)
+      }
+    }
+    if (problems.length) setProjectError(problems.join(' '))
+    setProjectUploading(false)
+  }
+
+  async function handleRetryProjectFile(f) {
+    setProjectError('')
+    setProjectFiles((prev) => prev.map((x) => (x.id === f.id ? { ...x, status: 'processing', error: null, created_at: new Date().toISOString() } : x)))
+    const failure = await runExtract(f.id)
+    if (failure) setProjectError(`"${f.name}": ${failure}`)
+    if (activeProject) await loadProjectFiles(activeProject.id)
+  }
+
+  async function handleDeleteProjectFile(f) {
+    if (!window.confirm(`Remove "${f.name}" from this project?`)) return
+    setProjectFiles((prev) => prev.filter((x) => x.id !== f.id))
+    try {
+      if (f.storage_path) await supabase.storage.from('assignment-images').remove([f.storage_path])
+      await supabase.from('project_files').delete().eq('id', f.id)
+    } catch (e) { /* best-effort */ }
+  }
+
+  function handleLikelyQuestions() {
+    handleQuickAction('What are the most likely exam questions from my project material? Group them by topic and say which file each comes from.')
+  }
+
+  // Opens a chat from a notification tap (?open=<chat id>).
+  async function openConversationById(id) {
+    if (!id) return
+    let conv = conversationsRef.current.find((cv) => cv.id === id)
+    if (!conv) {
+      const { data } = await supabase.from('conversations').select('id, title, mode, subject, updated_at, project_id').eq('id', id).maybeSingle()
+      conv = data || null
+    }
+    if (conv) await openConversation(conv)
+  }
+
   const handleStopGenerating = () => {
     abortControllerRef.current?.abort()
   }
 
   if (view === 'about') {
     return <AboutScreen theme={theme} accentColor={accentColor} onBack={() => setView('main')} />
+  }
+
+  if (view === 'library') {
+    return (
+      <>
+        <LibraryScreen theme={theme} accentColor={accentColor} projects={projects} onBack={() => setView('main')} onToast={showToast} />
+        {toast && <div style={{ position: 'fixed', left: '50%', bottom: '1.6rem', transform: 'translateX(-50%)', zIndex: 120, padding: '0.6rem 1.1rem', borderRadius: '20px', backgroundColor: c.surface, border: `1px solid ${c.border}`, color: c.text, fontSize: '0.85rem', boxShadow: '0 10px 28px rgba(0,0,0,0.35)' }}>{toast}</div>}
+      </>
+    )
   }
 
   if (view === 'settings') {
@@ -2714,6 +4074,7 @@ function Dashboard({ session }) {
         onOpenSettings={() => { setSidebarOpen(false); setView('settings') }}
         onGoHome={() => { setSidebarOpen(false); setView('main') }}
         onOpenAbout={() => { setSidebarOpen(false); setView('about') }}
+        onOpenLibrary={() => { setSidebarOpen(false); setView('library') }}
         onRenameConversation={handleRenameConversation}
         onDeleteConversation={handleDeleteConversation}
         onTogglePin={handleTogglePin}
@@ -2750,7 +4111,7 @@ function Dashboard({ session }) {
           </div>
         ) : (
           <div style={styles.modeToggle}>
-            <span style={{ ...styles.modeBtn, backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, borderColor: c.border }}>{(TOOLS.find((t) => t.id === tool) || {}).label}</span>
+            <span style={{ ...styles.modeBtn, backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, borderColor: c.border }}>{tool === 'project' && activeProject ? `Project: ${activeProject.name.length > 16 ? activeProject.name.slice(0, 16) + '...' : activeProject.name}` : (TOOLS.find((t) => t.id === tool) || {}).label}</span>
           </div>
         )}
         <button onClick={handleNewChat} style={styles.iconBtn}><NewChatIcon color={c.text} /></button>
@@ -2765,12 +4126,37 @@ function Dashboard({ session }) {
       />
 
       <div style={styles.messagesArea}>
+        {tool === 'project' && activeProject && messages.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', margin: '0 0 0.8rem', padding: '0.5rem 0.8rem', borderRadius: '14px', border: `1px solid ${c.border}`, backgroundColor: c.surface, flexShrink: 0 }}>
+            <span style={{ fontSize: '0.8rem', color: c.subtext, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Studying from {activeProject.name}</span>
+            <button type="button" onClick={() => setProjectManagerOpen(true)} style={{ ...styles.chipBtn, padding: '0.3rem 0.7rem', fontSize: '0.74rem', borderColor: c.border, color: c.text, flexShrink: 0 }}>Manage files</button>
+          </div>
+        )}
         {messages.length === 0 && !loading && (
           <div key={`${activeConversationId || 'new'}-${tool}`} className="radius-entrance" style={{ textAlign: 'center', margin: 'auto', padding: '0 1.2rem', maxWidth: '420px' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.6rem' }}>
               <Hero3D size={tool === 'chat' ? 150 : 110} />
             </div>
-            {tool === 'chat' || !TOOL_INFO[tool] ? (
+            {tool === 'project' ? (
+              <ProjectHome
+                c={c}
+                projects={projects}
+                activeProject={activeProject}
+                files={projectFiles}
+                uploading={projectUploading}
+                projectError={projectError}
+                onCreate={handleCreateProject}
+                onSelect={handleSelectProject}
+                onLeave={() => handleSelectProject(null)}
+                onDeleteProject={handleDeleteProject}
+                onUpload={handleUploadProjectFiles}
+                onRetryFile={handleRetryProjectFile}
+                onDeleteFile={handleDeleteProjectFile}
+                onSummary={() => handleSummary(true)}
+                onQuiz={() => handleQuiz(true)}
+                onLikely={handleLikelyQuestions}
+              />
+            ) : tool === 'chat' || !TOOL_INFO[tool] ? (
               <>
                 <p className="radius-display" style={{ fontSize: '1.5rem', fontWeight: 700 }}>Welcome, {displayName}</p>
                 <p style={{ color: c.subtext, marginTop: '0.4rem' }}>What assignment are we tackling today?</p>
@@ -2800,6 +4186,8 @@ function Dashboard({ session }) {
               theme={theme}
               accentColor={accentColor}
               feedback={m.feedback}
+              defaultOpen={!!m.fresh}
+              onSaveLibrary={handleSaveMessage}
               onLongPress={(x, y, msg) => setLongPressMenu({ x, y, ...msg })}
               onCopy={handleCopyText}
               onShare={handleShareText}
@@ -2807,30 +4195,53 @@ function Dashboard({ session }) {
               onFeedback={handleSetFeedback}
               onReply={startReply}
             />
-            {!loading && i === messages.length - 1 && m.role === 'assistant' && m.responseType === 'assignment' && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', margin: '0.5rem 0 0.8rem' }}>
-                <button type="button" onClick={handleRegenerateLast} style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}>
-                  Regenerate
-                </button>
-                {STUDY_ACTIONS.map((a) => (
-                  <button
-                    key={a.label}
-                    type="button"
-                    onClick={() => handleQuickAction(a.prompt)}
-                    style={{ ...styles.chipBtn, borderColor: c.border, color: c.text }}
-                  >
-                    {a.label}
-                  </button>
-                ))}
-              </div>
+            {!loading && i === messages.length - 1 && m.role === 'assistant' && m.responseType === 'assignment' && ['chat', 'project', 'notes', 'pastq'].includes(tool) && (
+              <ActionBar
+                c={c}
+                canRegen={!lastKind}
+                panel={actionPanel}
+                setPanel={setActionPanel}
+                busy={tempBusy}
+                hintLevel={hintLevel}
+                explainOpts={explainOpts}
+                setExplainOpts={setExplainOpts}
+                parts={actionPanel === 'explain' ? explainParts() : []}
+                quizOpts={quizOpts}
+                setQuizOpts={setQuizOpts}
+                onRegen={handleRegen}
+                onExplain={handleExplain}
+                onHint={handleHint}
+                onQuiz={() => handleQuiz(false)}
+                onSummary={() => handleSummary(false)}
+                onSolution={handleSolution}
+              />
             )}
           </div>
         ))}
 
+        <TempCards
+          cards={tempCards}
+          c={c}
+          hintLevel={hintLevel}
+          busy={tempBusy}
+          onDismiss={(id) => setTempCards((prev) => prev.filter((card) => card.id !== id))}
+          onSave={handleSaveTemp}
+          onMoreHint={handleHint}
+          onSolution={handleSolution}
+          onCopy={(t) => { handleCopyText(t); showToast('Copied') }}
+          onPdf={handleExportPdf}
+          onFlashcards={() => handleQuiz(tool === 'project' && messages.length === 0, { type: 'short', count: 8 })}
+        />
+        {tempBusy && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: c.subtext, padding: '0.4rem 0' }}>
+            <Cube3D size={18} />
+            Working on it...
+          </div>
+        )}
         {loading && !streaming && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: c.subtext, padding: '0.4rem 0' }}>
             <Cube3D size={18} />
-            Thinking...
+            {statusNote || 'Thinking...'}
           </div>
         )}
         {error && <p style={{ color: '#ef4444', padding: '0.4rem 0', textAlign: 'center' }}>{error}</p>}
@@ -2908,6 +4319,44 @@ function Dashboard({ session }) {
           <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply" style={{ width: '30px', height: '30px', borderRadius: '50%', border: 'none', backgroundColor: c.surfaceAlt, color: c.subtext, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" /></svg>
           </button>
+        </div>
+      )}
+
+      <QuizOverlay
+        quiz={quizOverlay}
+        c={c}
+        onClose={() => setQuizOverlay(null)}
+        onSave={handleSaveQuiz}
+        onRetry={() => quizOverlay?.redo?.()}
+      />
+
+      {projectManagerOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 70, backgroundColor: c.bg, backgroundImage: c.bgGlow, color: c.text, overflowY: 'auto', padding: '1.2rem' }}>
+          <ProjectHome
+            c={c}
+            projects={projects}
+            activeProject={activeProject}
+            files={projectFiles}
+            uploading={projectUploading}
+            projectError={projectError}
+            onCreate={handleCreateProject}
+            onSelect={handleSelectProject}
+            onLeave={() => { setProjectManagerOpen(false); handleSelectProject(null); handleNewChat() }}
+            onDeleteProject={handleDeleteProject}
+            onUpload={handleUploadProjectFiles}
+            onRetryFile={handleRetryProjectFile}
+            onDeleteFile={handleDeleteProjectFile}
+            onSummary={() => handleSummary(true)}
+            onQuiz={() => handleQuiz(true)}
+            onLikely={handleLikelyQuestions}
+            onClose={() => setProjectManagerOpen(false)}
+          />
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ position: 'fixed', left: '50%', bottom: '5.5rem', transform: 'translateX(-50%)', zIndex: 120, padding: '0.6rem 1.1rem', borderRadius: '20px', backgroundColor: c.surface, border: `1px solid ${c.border}`, color: c.text, fontSize: '0.85rem', boxShadow: '0 10px 28px rgba(0,0,0,0.35)' }}>
+          {toast}
         </div>
       )}
 
@@ -3024,12 +4473,12 @@ function ResetPasswordScreen({ onDone }) {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setMessage('')
-    if (newPassword !== confirmPassword) {
-      setMessage('Passwords do not match.')
+    if (!passwordStrength(newPassword).ok) {
+      setMessage(`Choose a stronger password. ${passwordStrength(newPassword).hint}`)
       return
     }
-    if (newPassword.length < 6) {
-      setMessage('Password must be at least 6 characters.')
+    if (newPassword !== confirmPassword) {
+      setMessage('Passwords do not match.')
       return
     }
     setLoading(true)
@@ -3047,23 +4496,19 @@ function ResetPasswordScreen({ onDone }) {
       <Logo />
       <p className="fade-in-2" style={styles.subtitle}>Set a new password</p>
       <form onSubmit={handleSubmit} className="fade-in-3" style={styles.form}>
-        <input
-          type="password"
-          placeholder="New password"
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-          required
-          style={styles.input}
-        />
-        <input
-          type="password"
-          placeholder="Confirm new password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          required
-          style={styles.input}
-        />
-        <button type="submit" disabled={loading} style={styles.button}>
+        <PasswordInput placeholder="New password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
+        <PasswordMeter password={newPassword} />
+        <PasswordInput placeholder="Confirm new password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
+        {confirmPassword && (
+          <p style={{ margin: '-0.2rem 0 0', textAlign: 'left', fontSize: '0.78rem', fontWeight: 600, color: confirmPassword === newPassword ? '#22c55e' : '#ef4444' }}>
+            {confirmPassword === newPassword ? 'Passwords match' : 'Passwords do not match'}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={loading || !passwordStrength(newPassword).ok || newPassword !== confirmPassword}
+          style={{ ...styles.button, opacity: !passwordStrength(newPassword).ok || newPassword !== confirmPassword ? 0.45 : 1 }}
+        >
           {loading ? 'Please wait...' : 'Update Password'}
         </button>
       </form>
@@ -3145,6 +4590,7 @@ const TOOLS = [
   { id: 'pastq', label: 'Past Qs' },
   { id: 'cite', label: 'Citation' },
   { id: 'plan', label: 'Exam Plan' },
+  { id: 'project', label: 'Project' },
 ]
 
 const TOOL_INFO = {
@@ -3196,6 +4642,7 @@ const TOOL_PLACEHOLDERS = {
   pastq: 'Paste or attach past questions for a course...',
   cite: 'Paste a link, title, or DOI to get a reference...',
   plan: 'List your exams, dates, topics and hours per day...',
+  project: 'Ask anything about your project material...',
 }
 
 const styles = {
