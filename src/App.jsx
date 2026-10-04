@@ -2936,6 +2936,12 @@ function Dashboard({ session }) {
   // any new database function.
   async function fetchUsage() {
     try {
+      // Preferred: the server's own count (what the limit actually enforces).
+      const { data: serverCount, error: serverError } = await supabase.rpc('rl_used', { p_window_minutes: 60 })
+      if (!serverError && typeof serverCount === 'number') {
+        setUsedThisHour(serverCount)
+        return
+      }
       const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
       const { count, error: usageError } = await supabase
         .from('messages')
