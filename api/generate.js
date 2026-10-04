@@ -487,9 +487,11 @@ ${closingLine}`
   // ---- Build the list of providers to try, in order ----
   const hasFiles = currentParts.some((p) => p.inline_data)
   const geminiKey = process.env.GEMINI_API_KEY
-  const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash']
+  // Each Gemini model has its own separate quota, so the older 2.5 models are
+  // extra safety nets when both Gemini 3 models are rate limited or busy.
+  const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
 
-  const geminiBody = JSON.stringify({
+  const geminiBodyGemini3 = JSON.stringify({
     system_instruction: { parts: [{ text: systemInstruction }] },
     contents,
     // Gemini 3 defaults to HIGH thinking when this is unset, which adds
@@ -500,6 +502,13 @@ ${closingLine}`
       maxOutputTokens: 4096,
     },
   })
+  // Gemini 2.5 does not accept thinkingLevel, so it gets the same request without it.
+  const geminiBodyOlder = (() => {
+    const o = JSON.parse(geminiBodyGemini3)
+    delete o.generationConfig.thinkingConfig
+    return JSON.stringify(o)
+  })()
+  const geminiBodyFor = (model) => (model.startsWith('gemini-3') ? geminiBodyGemini3 : geminiBodyOlder)
 
   // Plain text version of the conversation for the non-Gemini providers.
   const chatMessages = [
@@ -516,7 +525,7 @@ ${closingLine}`
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: geminiBody,
+        body: geminiBodyFor(model),
         signal: AbortSignal.timeout(25000),
       }
     )
@@ -564,7 +573,7 @@ ${closingLine}`
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: geminiBody,
+        body: geminiBodyFor(model),
         signal: AbortSignal.timeout(25000),
       }
     )

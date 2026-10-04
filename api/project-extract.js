@@ -9,7 +9,9 @@ const supabaseAuth = createClient(
   process.env.VITE_SUPABASE_ANON_KEY
 )
 
-const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash']
+// Each Gemini model has its own separate quota, so the 2.5 models are extra
+// safety nets when both Gemini 3 models are rate limited or busy.
+const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
 const MAX_FILE_BYTES = 12 * 1024 * 1024
 const MAX_TEXT_CHARS = 400000
 
@@ -31,7 +33,9 @@ async function callGemini(model, parts) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
-        generationConfig: { thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 16000 },
+        generationConfig: model.startsWith('gemini-3')
+          ? { thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 16000 }
+          : { maxOutputTokens: 16000 },
       }),
       signal: AbortSignal.timeout(50000),
     }
@@ -117,7 +121,7 @@ export default async function handler(req, res) {
         lastStatus = r.status
         console.error(`project-extract ${model} failed:`, r.status, r.detail)
         if ((r.status === 429 || r.status === 503) && attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 1200))
+          await new Promise((resolve) => setTimeout(resolve, 2500))
           continue
         }
         break
