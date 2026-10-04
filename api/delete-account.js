@@ -71,6 +71,10 @@ export default async function handler(req, res) {
     await supabaseAdmin.from('conversations').delete().eq('user_id', userId)
     await supabaseAdmin.from('profiles').delete().eq('user_id', userId)
     await supabaseAdmin.from('rate_limits').delete().eq('user_id', userId)
+    await supabaseAdmin.from('study_library').delete().eq('user_id', userId)
+    await supabaseAdmin.from('push_subscriptions').delete().eq('user_id', userId)
+    await supabaseAdmin.from('project_files').delete().eq('user_id', userId)
+    await supabaseAdmin.from('projects').delete().eq('user_id', userId)
 
     const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId)
     if (deleteError) {
