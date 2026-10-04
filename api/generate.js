@@ -279,10 +279,26 @@ export default async function handler(req, res) {
     process.env.VITE_SUPABASE_ANON_KEY,
     { global: { headers: { Authorization: `Bearer ${token}` } } }
   )
-  const { data: rateLimitOk, error: rateLimitError } = await supabaseAsUser.rpc('check_rate_limit', {
+  // rl_check / rl_refund / rl_used come from radius_rate_limit_fix.sql. Requests
+  // that end in a server-side failure (Google busy, etc.) are refunded, so a
+  // student is only charged for answers they actually received. If that SQL has
+  // not been run yet, the old check_rate_limit() is used instead.
+  let usingRefundableLimit = true
+  let { data: rateLimitOk, error: rateLimitError } = await supabaseAsUser.rpc('rl_check', {
     p_limit: 20,
     p_window_minutes: 60,
   })
+  if (rateLimitError) {
+    usingRefundableLimit = false
+    ;({ data: rateLimitOk, error: rateLimitError } = await supabaseAsUser.rpc('check_rate_limit', {
+      p_limit: 20,
+      p_window_minutes: 60,
+    }))
+  }
+  async function refundQuota() {
+    if (!usingRefundableLimit) return
+    try { await supabaseAsUser.rpc('rl_refund') } catch (e) { /* best-effort */ }
+  }
   if (rateLimitError) {
     console.error('Rate limit check errored (failing open):', rateLimitError.message)
   } else if (rateLimitOk === false) {
@@ -673,6 +689,7 @@ ${closingLine}`
     }
 
     if (text === null) {
+      await refundQuota()
       if (sawRateLimit) {
         return fail(429, 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.')
       }
