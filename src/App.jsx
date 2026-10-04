@@ -6,6 +6,99 @@ import rehypeKatex from 'rehype-katex'
 import { renderToStaticMarkup } from 'react-dom/server'
 import 'katex/dist/katex.min.css'
 
+// ---- PWA install prompt -----------------------------------------------------
+// The browser fires this event once, early, so it is captured at module level
+// and handed to the Settings "Install" card whenever that is on screen.
+let deferredInstallPrompt = null
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    deferredInstallPrompt = e
+    window.dispatchEvent(new Event('radius-install-ready'))
+  })
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null
+    window.dispatchEvent(new Event('radius-install-ready'))
+  })
+}
+
+// While a reply is streaming in, hide the hidden type tag at the start and the
+// Study Pack JSON block at the end so the student never sees them flash by.
+function cleanStreamText(raw) {
+  let t = raw || ''
+  t = t.replace(/^\s*\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/i, '')
+  if (/^\s*\[[A-Za-z:]*$/.test(t)) return ''
+  const idx = t.indexOf('<study_data>')
+  if (idx !== -1) t = t.slice(0, idx)
+  else t = t.replace(/<[a-z_]{0,11}$/, '')
+  return t.trim() ? t : ''
+}
+
+function MicIcon({ color }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <rect x="9" y="3" width="6" height="11" rx="3" stroke={color} strokeWidth="1.8" />
+      <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function SearchIcon({ color }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <circle cx="11" cy="11" r="6.5" stroke={color} strokeWidth="1.8" />
+      <path d="M16 16l4.5 4.5" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function InstallCard({ c }) {
+  const [canPrompt, setCanPrompt] = useState(!!deferredInstallPrompt)
+  useEffect(() => {
+    const sync = () => setCanPrompt(!!deferredInstallPrompt)
+    window.addEventListener('radius-install-ready', sync)
+    return () => window.removeEventListener('radius-install-ready', sync)
+  }, [])
+
+  const standalone =
+    typeof window !== 'undefined' &&
+    ((window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true)
+  if (standalone) return null
+
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+  const install = async () => {
+    if (!deferredInstallPrompt) return
+    deferredInstallPrompt.prompt()
+    try { await deferredInstallPrompt.userChoice } catch (e) { /* ignore */ }
+    deferredInstallPrompt = null
+    setCanPrompt(false)
+  }
+
+  return (
+    <SettingsCard c={c}>
+      <p style={{ color: c.subtext, fontSize: '0.78rem', fontWeight: 'bold', letterSpacing: '0.04em', margin: '0 0 0.6rem' }}>INSTALL APP</p>
+      <p style={{ margin: '0 0 0.7rem', fontSize: '0.88rem', lineHeight: '1.5', color: c.text }}>
+        Add RADIUS to your home screen to open it full-screen like a normal app.
+      </p>
+      {canPrompt ? (
+        <button
+          type="button"
+          onClick={install}
+          style={{ padding: '0.65rem 1rem', borderRadius: '10px', border: 'none', backgroundColor: c.accent, color: c.accentText, fontWeight: 'bold', fontSize: '0.88rem', cursor: 'pointer' }}
+        >
+          Install RADIUS
+        </button>
+      ) : (
+        <p style={{ margin: 0, fontSize: '0.8rem', color: c.subtext, lineHeight: '1.5' }}>
+          {isIOS
+            ? 'On iPhone: tap the Share button in Safari, then "Add to Home Screen".'
+            : 'Open your browser menu (the three dots) and tap "Install app" or "Add to Home screen".'}
+        </p>
+      )}
+    </SettingsCard>
+  )
+}
+
 function EyeIcon({ color }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -786,6 +879,9 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         </div>
       </SettingsCard>
 
+      {/* Install as an app */}
+      <InstallCard c={c} />
+
       {/* Membership */}
       <SettingsCard c={c} style={{ padding: 0, overflow: 'hidden' }}>
         <button
@@ -1325,6 +1421,39 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
   const [rowMenu, setRowMenu] = useState(null)
   const [renamingId, setRenamingId] = useState(null)
   const [renameValue, setRenameValue] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [contentMatchIds, setContentMatchIds] = useState(null)
+  const [searching, setSearching] = useState(false)
+
+  useEffect(() => {
+    const q = searchQuery.trim()
+    if (q.length < 2) {
+      setContentMatchIds(null)
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      try {
+        const escaped = q.replace(/[%_\\]/g, (m) => '\\' + m)
+        const { data, error } = await supabase
+          .from('messages')
+          .select('conversation_id')
+          .ilike('content', `%${escaped}%`)
+          .limit(200)
+        if (cancelled) return
+        setContentMatchIds(error ? null : new Set((data || []).map((r) => r.conversation_id)))
+      } catch (e) {
+        if (!cancelled) setContentMatchIds(null)
+      }
+      if (!cancelled) setSearching(false)
+    }, 350)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [searchQuery])
 
   if (!open) return null
 
@@ -1354,6 +1483,10 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
 
   const pinnedConvs = conversations.filter((cv) => cv.is_pinned)
   const recentConvs = conversations.filter((cv) => !cv.is_pinned)
+  const q = searchQuery.trim().toLowerCase()
+  const searchResults = q
+    ? conversations.filter((cv) => (cv.title || '').toLowerCase().includes(q) || (contentMatchIds && contentMatchIds.has(cv.id)))
+    : []
 
   const renderRow = (conv) => (
     <ConversationRow
@@ -1403,19 +1536,56 @@ function Sidebar({ open, onClose, conversations, activeConversationId, onSelectC
           New chat
         </button>
 
+        <div style={{ position: 'relative', margin: '0.7rem 1rem 0' }}>
+          <span style={{ position: 'absolute', left: '0.7rem', top: '50%', transform: 'translateY(-50%)', display: 'flex', pointerEvents: 'none' }}>
+            <SearchIcon color={c.subtext} />
+          </span>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search chats"
+            style={{ width: '100%', boxSizing: 'border-box', padding: '0.55rem 2rem 0.55rem 2.1rem', borderRadius: '8px', border: `1px solid ${c.border}`, backgroundColor: c.bg, color: c.text, fontSize: '0.88rem', outline: 'none' }}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="Clear search"
+              style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: c.subtext, cursor: 'pointer', fontSize: '0.95rem', padding: '0.2rem 0.4rem' }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 0.6rem' }}>
-          {pinnedConvs.length > 0 && (
+          {q ? (
             <>
-              <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 0.4rem 0.4rem' }}>PINNED</p>
-              {pinnedConvs.map(renderRow)}
+              <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 0.4rem 0.4rem' }}>
+                {searching ? 'SEARCHING...' : `RESULTS (${searchResults.length})`}
+              </p>
+              {!searching && searchResults.length === 0 && (
+                <p style={{ color: c.subtext, fontSize: '0.85rem', padding: '0.6rem' }}>No chats match "{searchQuery.trim()}"</p>
+              )}
+              {searchResults.map(renderRow)}
+            </>
+          ) : (
+            <>
+              {pinnedConvs.length > 0 && (
+                <>
+                  <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 0.4rem 0.4rem' }}>PINNED</p>
+                  {pinnedConvs.map(renderRow)}
+                </>
+              )}
+
+              <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 0.4rem 0.4rem' }}>RECENT</p>
+              {recentConvs.length === 0 && pinnedConvs.length === 0 && (
+                <p style={{ color: c.subtext, fontSize: '0.85rem', padding: '0.6rem' }}>No chats yet</p>
+              )}
+              {recentConvs.map(renderRow)}
             </>
           )}
-
-          <p style={{ color: c.subtext, fontSize: '0.75rem', margin: '1rem 0.4rem 0.4rem' }}>RECENT</p>
-          {recentConvs.length === 0 && pinnedConvs.length === 0 && (
-            <p style={{ color: c.subtext, fontSize: '0.85rem', padding: '0.6rem' }}>No chats yet</p>
-          )}
-          {recentConvs.map(renderRow)}
         </div>
 
         <div
@@ -1515,6 +1685,10 @@ function Dashboard({ session }) {
   const [profile, setProfile] = useState(null)
   const [showNicknamePrompt, setShowNicknamePrompt] = useState(false)
   const [enterToSend, setEnterToSend] = useState(() => localStorage.getItem('radius-enter-to-send') === 'true')
+  const [streaming, setStreaming] = useState(false)
+  const [retryPayload, setRetryPayload] = useState(null)
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef(null)
 
   const c = getPalette(theme, accentColor)
   const displayName = profile?.nickname || session.user.user_metadata?.full_name || session.user.email.split('@')[0]
@@ -1545,8 +1719,21 @@ function Dashboard({ session }) {
   }, [accentColor])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+    messagesEndRef.current?.scrollIntoView({ behavior: streaming ? 'auto' : 'smooth' })
+  }, [messages, loading, streaming])
+
+  useEffect(() => {
+    const el = textAreaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 150) + 'px'
+  }, [assignmentText])
+
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.abort() } catch (e) { /* ignore */ }
+    }
+  }, [])
 
   useEffect(() => {
     fetchUsage()
@@ -1836,10 +2023,196 @@ function Dashboard({ session }) {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
+  // ---- Voice input (the phone's built-in speech-to-text) ----
+  const SpeechRecognitionCtor =
+    typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
+
+  const stopListening = () => {
+    try { recognitionRef.current?.stop() } catch (e) { /* ignore */ }
+  }
+
+  const toggleListening = () => {
+    if (!SpeechRecognitionCtor) return
+    if (listening) {
+      stopListening()
+      return
+    }
+    const rec = new SpeechRecognitionCtor()
+    rec.lang = 'en-NG'
+    rec.continuous = true
+    rec.interimResults = true
+    // Whatever was already typed stays; the spoken words are added after it.
+    const base = assignmentText ? assignmentText.replace(/\s+$/, '') + ' ' : ''
+    rec.onresult = (event) => {
+      const spoken = Array.from(event.results).map((r) => r[0].transcript).join('')
+      setAssignmentText(base + spoken.trimStart())
+    }
+    rec.onerror = (event) => {
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setError('Microphone access is blocked. Allow it in your browser settings to use voice input.')
+      } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        setError('Voice input stopped unexpectedly. Please try again.')
+      }
+    }
+    rec.onend = () => {
+      setListening(false)
+      recognitionRef.current = null
+    }
+    recognitionRef.current = rec
+    try {
+      rec.start()
+      setListening(true)
+      setError('')
+    } catch (e) {
+      setListening(false)
+    }
+  }
+
+  // ---- Ask the backend for a reply, streaming it in as it is written ----
+  // Kept separate from handleSubmit so the Retry button can run it again with
+  // the same payload, without re-uploading files or duplicating the question.
+  async function requestReply(payload) {
+    const { conversationId, userText, filesForApi, history } = payload
+    setRetryPayload(null)
+    setError('')
+    setLoading(true)
+    setStreaming(false)
+
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    const streamId = `temp-a-${Date.now()}`
+    let streamText = ''
+    let placeholderAdded = false
+    const removePlaceholder = () => {
+      if (placeholderAdded) {
+        setMessages((prev) => prev.filter((m) => m.id !== streamId))
+        placeholderAdded = false
+      }
+    }
+
+    const finish = async (result, responseType) => {
+      if (placeholderAdded) {
+        setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: result, responseType } : m)))
+      } else {
+        placeholderAdded = true
+        setMessages((prev) => [...prev, { id: streamId, role: 'assistant', content: result, responseType }])
+      }
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: result })
+      loadConversations()
+      touchStreak()
+      fetchUsage()
+    }
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          subject,
+          mode,
+          tool,
+          assignmentText: userText,
+          history,
+          images: filesForApi,
+          nickname: profile?.nickname || null,
+          responseStyle: profile?.response_style || 'balanced',
+          stream: true,
+        }),
+        signal: controller.signal,
+      })
+
+      const contentType = response.headers.get('content-type') || ''
+      if (!response.ok || !contentType.includes('ndjson')) {
+        // Normal JSON answer: an error, or a backend that doesn't stream yet.
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || 'Something went wrong.')
+        await finish(data.result, data.responseType)
+      } else {
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let finalResult = null
+        let finalType = 'general'
+        let streamError = null
+
+        const handleEvent = (line) => {
+          if (!line.trim()) return
+          let ev
+          try { ev = JSON.parse(line) } catch (e) { return }
+          if (ev.t === 'delta') {
+            streamText += ev.text
+            const shown = cleanStreamText(streamText)
+            if (!shown) return
+            if (!placeholderAdded) {
+              placeholderAdded = true
+              setStreaming(true)
+              setMessages((prev) => [...prev, { id: streamId, role: 'assistant', content: shown }])
+            } else {
+              setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: shown } : m)))
+            }
+          } else if (ev.t === 'reset') {
+            streamText = ''
+            removePlaceholder()
+            setStreaming(false)
+          } else if (ev.t === 'done') {
+            finalResult = ev.result
+            finalType = ev.responseType || 'general'
+          } else if (ev.t === 'error') {
+            streamError = ev.error
+          }
+        }
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop()
+          lines.forEach(handleEvent)
+        }
+        if (buffer.trim()) handleEvent(buffer)
+
+        if (streamError) throw new Error(streamError)
+        if (finalResult === null) throw new Error('The reply was cut off. Tap Retry to try again.')
+        await finish(finalResult, finalType)
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        // The student pressed stop: keep whatever text had already arrived.
+        const partial = cleanStreamText(streamText)
+        if (partial && placeholderAdded) {
+          try {
+            await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: partial })
+            loadConversations()
+          } catch (e) { /* best-effort */ }
+        } else {
+          removePlaceholder()
+        }
+      } else {
+        removePlaceholder()
+        setError(err.message || 'Network error. Please try again.')
+        setRetryPayload(payload)
+      }
+    }
+    abortControllerRef.current = null
+    setStreaming(false)
+    setLoading(false)
+  }
+
+  const handleRetry = () => {
+    if (retryPayload && !loading) requestReply(retryPayload)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!assignmentText.trim() && attachedFiles.length === 0) return
 
+    stopListening()
+    setRetryPayload(null)
     setLoading(true)
     setError('')
 
@@ -1920,41 +2293,12 @@ function Dashboard({ session }) {
 
       const history = messages.map((m) => ({ role: m.role, content: splitStudy(m.content).text }))
 
-      const controller = new AbortController()
-      abortControllerRef.current = controller
-
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          subject,
-          mode,
-          tool,
-          assignmentText: userText,
-          history,
-          images: filesForApi,
-          nickname: profile?.nickname || null,
-          responseStyle: profile?.response_style || 'balanced',
-        }),
-        signal: controller.signal,
-      })
-      const data = await response.json()
-
-      if (!response.ok) {
-        setError(data.error || 'Something went wrong.')
-      } else {
-        setMessages((prev) => [...prev, { id: `temp-a-${Date.now()}`, role: 'assistant', content: data.result, responseType: data.responseType }])
-        await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: data.result })
-        loadConversations()
-        touchStreak()
-        fetchUsage()
-      }
+      await requestReply({ conversationId, userText, filesForApi, history })
     } catch (err) {
-      // A user-initiated stop shows no error - that's expected, not a failure.
+      // Something failed before the question was sent (creating the chat or
+      // uploading a file). Put the text back so nothing the student typed is lost.
       if (err.name !== 'AbortError') {
+        setAssignmentText(userText)
         setError(err.message || 'Network error. Please try again.')
       }
     }
@@ -2112,13 +2456,20 @@ function Dashboard({ session }) {
           </div>
         ))}
 
-        {loading && (
+        {loading && !streaming && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: c.subtext, padding: '0.4rem 0' }}>
             <span className="radius-spinner" style={{ color: c.accent }} />
             Thinking...
           </div>
         )}
         {error && <p style={{ color: '#ef4444', padding: '0.4rem 0', textAlign: 'center' }}>{error}</p>}
+        {retryPayload && !loading && (
+          <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '0.6rem' }}>
+            <button type="button" onClick={handleRetry} style={{ ...styles.chipBtn, borderColor: c.accent, backgroundColor: c.accent, color: c.accentText, fontWeight: 'bold' }}>
+              Retry
+            </button>
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
       </div>
@@ -2218,7 +2569,7 @@ function Dashboard({ session }) {
         <textarea
           ref={textAreaRef}
           rows={1}
-          placeholder={TOOL_PLACEHOLDERS[tool]}
+          placeholder={listening ? 'Listening...' : TOOL_PLACEHOLDERS[tool]}
           value={assignmentText}
           onChange={(e) => {
             setAssignmentText(e.target.value)
@@ -2234,6 +2585,16 @@ function Dashboard({ session }) {
           }}
           style={{ ...styles.bottomInput, color: c.text }}
         />
+        {SpeechRecognitionCtor && (
+          <button
+            type="button"
+            onClick={toggleListening}
+            aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+            style={{ ...styles.attachBtn, justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0, backgroundColor: listening ? c.accent : 'transparent' }}
+          >
+            <MicIcon color={listening ? c.accentText : c.text} />
+          </button>
+        )}
         {loading ? (
           <button
             type="button"
@@ -2325,6 +2686,23 @@ function App() {
   const [passwordRecovery, setPasswordRecovery] = useState(false)
   const [showLanding, setShowLanding] = useState(true)
   const [authSignUp, setAuthSignUp] = useState(true)
+
+  useEffect(() => {
+    // Installable app setup. These tags are only added here if index.html
+    // doesn't already have them, so it is safe either way.
+    const addTag = (tag, attrs, selector) => {
+      if (document.querySelector(selector)) return
+      const el = document.createElement(tag)
+      Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v))
+      document.head.appendChild(el)
+    }
+    addTag('link', { rel: 'manifest', href: '/manifest.webmanifest' }, 'link[rel="manifest"]')
+    addTag('meta', { name: 'theme-color', content: '#0f0f0f' }, 'meta[name="theme-color"]')
+    addTag('link', { rel: 'apple-touch-icon', href: '/logo.png' }, 'link[rel="apple-touch-icon"]')
+    if ('serviceWorker' in navigator && import.meta.env.PROD) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
