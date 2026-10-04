@@ -106,6 +106,10 @@ export default async function handler(req, res) {
 
   const { subject, mode, assignmentText, history, images, nickname, responseStyle, tool: rawTool } = req.body
   const tool = VALID_TOOLS.includes(rawTool) ? rawTool : 'chat'
+  // When true, the reply is sent back as newline-delimited JSON events so the
+  // app can show the text as it is written. Old clients that don't send the
+  // flag keep getting the normal single JSON response.
+  const wantStream = req.body && req.body.stream === true
   const todayText = new Date().toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const imageList = Array.isArray(images) ? images.slice(0, 10) : []
 
@@ -250,6 +254,90 @@ ${closingLine}`
     return text ? { ok: true, text } : { ok: false, status: 502, detail: 'empty reply' }
   }
 
+  // ---- Streaming plumbing (only used when the app asks for stream: true) ----
+  let streamStarted = false
+  let needsReset = false
+
+  function startStream() {
+    if (streamStarted) return
+    streamStarted = true
+    res.status(200)
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('X-Accel-Buffering', 'no')
+    if (typeof res.flushHeaders === 'function') res.flushHeaders()
+  }
+
+  function emit(obj) {
+    startStream()
+    res.write(JSON.stringify(obj) + '\n')
+  }
+
+  // Sends an error in the right shape: as a normal HTTP error if nothing has
+  // been streamed yet, or as a final stream event if text is already flowing.
+  function fail(status, message) {
+    if (streamStarted) {
+      emit({ t: 'error', error: message })
+      return res.end()
+    }
+    return res.status(status).json({ error: message })
+  }
+
+  async function tryGeminiStream(model) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: geminiBody,
+        signal: AbortSignal.timeout(25000),
+      }
+    )
+    if (!response.ok) {
+      const data = await response.json().catch(() => null)
+      return { ok: false, status: response.status, detail: data?.error?.message }
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let full = ''
+    let sentDelta = false
+
+    const handleLine = (line) => {
+      if (!line.startsWith('data:')) return
+      const payload = line.slice(5).trim()
+      if (!payload || payload === '[DONE]') return
+      let json
+      try { json = JSON.parse(payload) } catch (e) { return }
+      const parts = json?.candidates?.[0]?.content?.parts || []
+      const piece = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
+      if (piece) {
+        full += piece
+        sentDelta = true
+        emit({ t: 'delta', text: piece })
+      }
+    }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop()
+        for (const line of lines) handleLine(line.trim())
+      }
+      if (buffer.trim()) handleLine(buffer.trim())
+    } catch (e) {
+      if (sentDelta) needsReset = true
+      return { ok: false, status: 502, detail: 'stream interrupted: ' + (e?.message || '') }
+    }
+
+    if (!full) return { ok: false, status: 502, detail: 'empty reply' }
+    return { ok: true, text: full }
+  }
+
   async function tryCompat(provider) {
     const response = await fetch(provider.url, {
       method: 'POST',
@@ -275,7 +363,7 @@ ${closingLine}`
   const attempts = []
   if (geminiKey) {
     for (const model of GEMINI_MODELS) {
-      attempts.push({ label: `gemini:${model}`, retryOnBusy: true, run: () => tryGemini(model) })
+      attempts.push({ label: `gemini:${model}`, retryOnBusy: true, run: () => (wantStream ? tryGeminiStream(model) : tryGemini(model)) })
     }
   }
   // Other providers only take text. If the message has images/PDFs, only
@@ -298,6 +386,10 @@ ${closingLine}`
       for (let i = 0; i < maxTries && text === null; i++) {
         let result
         try {
+          if (wantStream && needsReset) {
+            emit({ t: 'reset' })
+            needsReset = false
+          }
           result = await attempt.run()
         } catch (e) {
           console.error(`Provider ${attempt.label} threw:`, e?.message)
@@ -323,14 +415,14 @@ ${closingLine}`
 
     if (text === null) {
       if (sawRateLimit) {
-        return res.status(429).json({ error: 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.' })
+        return fail(429, 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.')
       }
       if (sawOverload) {
-        return res.status(503).json({ error: 'RADIUS is briefly overloaded. Please try again in a few seconds.' })
+        return fail(503, 'RADIUS is briefly overloaded. Please try again in a few seconds.')
       }
       // Never leak the raw upstream error message to the user. Full detail
       // is in the Vercel logs above.
-      return res.status(500).json({ error: "Something went wrong on RADIUS's end. Please try again." })
+      return fail(500, "Something went wrong on RADIUS's end. Please try again.")
     }
 
     // Strip the required leading type tag and use it to decide whether the
@@ -378,9 +470,15 @@ ${closingLine}`
       }
     }
 
+    if (wantStream) {
+      // The final event carries the fully cleaned text (tag stripped, study
+      // cards attached) and replaces whatever was streamed so far.
+      emit({ t: 'done', result: text, responseType })
+      return res.end()
+    }
     return res.status(200).json({ result: text, responseType })
   } catch (err) {
     console.error('generate.js error:', err)
-    return res.status(500).json({ error: "Something went wrong on RADIUS's end. Please try again." })
+    return fail(500, "Something went wrong on RADIUS's end. Please try again.")
   }
 }
