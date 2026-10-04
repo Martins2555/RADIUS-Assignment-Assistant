@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "api/generate.js": { "maxDuration": 60 },
+    "api/project-extract.js": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/cron-reminders", "schedule": "0 17 * * *" }
+  ]
+}
