@@ -107,7 +107,9 @@ export default async function handler(req, res) {
     ]
 
     let result = null
-    let lastStatus = 0
+    let sawBusy = false
+    let otherDetail = ''
+    const trace = []
     for (const model of GEMINI_MODELS) {
       for (let attempt = 0; attempt < 2 && !result; attempt++) {
         let r
@@ -115,10 +117,14 @@ export default async function handler(req, res) {
           r = await callGemini(model, parts)
         } catch (e) {
           console.error(`project-extract ${model} threw:`, e?.message)
+          trace.push(`${model.replace('gemini-', '')}:error`)
+          if (!otherDetail) otherDetail = String(e?.message || 'request failed').slice(0, 120)
           break
         }
         if (r.ok) { result = r; break }
-        lastStatus = r.status
+        trace.push(`${model.replace('gemini-', '')}:${r.status}`)
+        if (r.status === 429 || r.status === 503) sawBusy = true
+        else if (!otherDetail) otherDetail = String(r.detail || r.status).slice(0, 120)
         console.error(`project-extract ${model} failed:`, r.status, r.detail)
         if ((r.status === 429 || r.status === 503) && attempt === 0) {
           await new Promise((resolve) => setTimeout(resolve, 2500))
@@ -130,10 +136,13 @@ export default async function handler(req, res) {
     }
 
     if (!result) {
+      // The short code list at the end is a temporary diagnostic so a
+      // screenshot of the error shows exactly which model said what.
+      const codes = ` (${trace.join(' ')}${otherDetail ? ' - ' + otherDetail : ''})`
       return await fail(
-        lastStatus === 429 || lastStatus === 503
+        (sawBusy
           ? 'RADIUS is busy right now. Tap Retry in a minute.'
-          : 'RADIUS could not read this file. Try a clearer photo or a PDF.'
+          : 'RADIUS could not read this file. Try a clearer photo or a PDF.') + codes
       )
     }
 
