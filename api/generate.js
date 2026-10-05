@@ -487,9 +487,10 @@ ${closingLine}`
   // ---- Build the list of providers to try, in order ----
   const hasFiles = currentParts.some((p) => p.inline_data)
   const geminiKey = process.env.GEMINI_API_KEY
-  // Each Gemini model has its own separate quota, so the older 2.5 models are
-  // extra safety nets when both Gemini 3 models are rate limited or busy.
-  const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
+  // Each Gemini model has its own separate quota, so gemini-3.8 is an extra
+  // safety net when both Flash models are rate limited or busy. (The 2.5
+  // models are closed to new users, so they are not used.)
+  const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.8']
 
   const geminiBodyGemini3 = JSON.stringify({
     system_instruction: { parts: [{ text: systemInstruction }] },

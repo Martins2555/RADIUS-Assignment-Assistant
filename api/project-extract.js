@@ -9,9 +9,10 @@ const supabaseAuth = createClient(
   process.env.VITE_SUPABASE_ANON_KEY
 )
 
-// Each Gemini model has its own separate quota, so the 2.5 models are extra
-// safety nets when both Gemini 3 models are rate limited or busy.
-const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
+// Each Gemini model has its own separate quota, so gemini-3.8 is an extra
+// safety net when both Flash models are rate limited or busy. (The 2.5
+// models are closed to new users, so they are not used.)
+const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.8']
 const MAX_FILE_BYTES = 12 * 1024 * 1024
 const MAX_TEXT_CHARS = 400000
 
