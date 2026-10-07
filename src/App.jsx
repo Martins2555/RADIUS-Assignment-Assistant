@@ -2809,6 +2809,9 @@ function Dashboard({ session }) {
   const cameraInputRef = useRef(null)
   const avatarInputRef = useRef(null)
   const abortControllerRef = useRef(null)
+  // Lets Stop work during the steps before the request is sent (creating the
+  // chat, uploading files), when there is no network request to abort yet.
+  const preflightRef = useRef({ cancelled: false })
   const formRef = useRef(null)
 
   useEffect(() => {
@@ -3335,6 +3338,23 @@ function Dashboard({ session }) {
     const streamId = `temp-a-${Date.now()}`
     let streamText = ''
     let placeholderAdded = false
+    // Re-rendering markdown + maths on every tiny chunk makes long replies
+    // lag on phones. Updates are batched to at most one per screen frame.
+    let rafId = 0
+    let pendingShown = null
+    let streamClosed = false
+    const flushStream = () => {
+      rafId = 0
+      if (streamClosed || pendingShown === null) return
+      const v = pendingShown
+      pendingShown = null
+      setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: v } : m)))
+    }
+    const closeStream = () => {
+      streamClosed = true
+      pendingShown = null
+      if (rafId) { try { cancelAnimationFrame(rafId) } catch (e) { /* ignore */ } rafId = 0 }
+    }
     const swapIn = (content, responseType, extra) => {
       setMessages((prev) => {
         const base = replaceId ? prev.filter((m) => m.id !== replaceId) : prev
@@ -3342,6 +3362,7 @@ function Dashboard({ session }) {
       })
     }
     const removePlaceholder = () => {
+      pendingShown = null
       if (placeholderAdded) {
         setMessages((prev) => prev.filter((m) => m.id !== streamId))
         placeholderAdded = false
@@ -3349,6 +3370,7 @@ function Dashboard({ session }) {
     }
 
     const finish = async (result, responseType) => {
+      closeStream()
       const stored = kind ? `<!--KIND:${kind}-->\n${result}` : result
       if (placeholderAdded) {
         setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: stored, responseType, fresh: true } : m)))
@@ -3434,7 +3456,8 @@ function Dashboard({ session }) {
               setStreaming(true)
               swapIn(shown)
             } else {
-              setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: shown } : m)))
+              pendingShown = shown
+              if (!rafId) rafId = requestAnimationFrame(flushStream)
             }
           } else if (ev.t === 'reset') {
             streamText = ''
@@ -3464,9 +3487,13 @@ function Dashboard({ session }) {
         await finish(finalResult, finalType)
       }
     } catch (err) {
+      closeStream()
       const looksLikeDrop = err instanceof TypeError || /cut off|network|load failed|failed to fetch/i.test(err.message || '')
       if (err.name === 'AbortError' && !stalled) {
-        // The student pressed stop: keep whatever text had already arrived.
+        // The student pressed stop: the screen already reacted instantly (see
+        // handleStopGenerating). Keep whatever text had already arrived.
+        setStreaming(false)
+        setLoading(false)
         const partial = cleanStreamText(streamText)
         if (partial && placeholderAdded) {
           try {
@@ -3593,6 +3620,15 @@ function Dashboard({ session }) {
     setHintLevel(0)
     setLoading(true)
     setError('')
+    const pre = { cancelled: false }
+    preflightRef.current = pre
+    const throwIfStopped = () => {
+      if (pre.cancelled) {
+        const stopErr = new Error('stopped')
+        stopErr.name = 'AbortError'
+        throw stopErr
+      }
+    }
 
     const userText = assignmentText
     const filesToSend = attachedFiles
@@ -3617,6 +3653,7 @@ function Dashboard({ session }) {
           convError = retry.error
         }
         if (convError) throw new Error(convError.message)
+        throwIfStopped()
         conversationId = newConv.id
         setActiveConversationId(conversationId)
         setConversations((prev) => [newConv, ...prev])
@@ -3626,6 +3663,7 @@ function Dashboard({ session }) {
       const filesForApi = []
       const attachmentFailures = []
       for (const file of filesToSend) {
+        throwIfStopped()
         const ext = file.mimeType === 'application/pdf' ? 'pdf' : (file.mimeType.split('/')[1] || 'dat')
         const path = `${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
         const blob = await (await fetch(`data:${file.mimeType};base64,${file.base64}`)).blob()
@@ -3681,7 +3719,10 @@ function Dashboard({ session }) {
         : userText
 
       setMessages((prev) => [...prev, { id: `temp-u-${Date.now()}`, role: 'user', content: userContent }])
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userContent })
+      throwIfStopped()
+      // Saved in the background: the request to the AI no longer waits for it.
+      // (The AI answer is only saved seconds later, so the order stays correct.)
+      Promise.resolve(supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: userContent })).catch(() => {})
       fetchUsage()
 
       const history = buildHistory(messages)
@@ -4030,7 +4071,11 @@ function Dashboard({ session }) {
   }
 
   const handleStopGenerating = () => {
+    preflightRef.current.cancelled = true
     abortControllerRef.current?.abort()
+    // Respond instantly; saving the partial answer continues in the background.
+    setStreaming(false)
+    setLoading(false)
   }
 
   if (view === 'about') {
