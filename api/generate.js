@@ -262,6 +262,14 @@ export default async function handler(req, res) {
   }
 
   const requestStartedAt = new Date(Date.now() - 1500).toISOString()
+  // Auth check and rate-limit check are independent, so they run at the same
+  // time instead of one after the other (saves a full database round trip).
+  const supabaseAsUser = createClient(
+    process.env.VITE_SUPABASE_URL,
+    process.env.VITE_SUPABASE_ANON_KEY,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  )
+  const rlPromise = Promise.resolve(supabaseAsUser.rpc('rl_check', { p_limit: 20, p_window_minutes: 60 }))
   const { data: userData, error: authError } = await supabaseAuth.auth.getUser(token)
   if (authError || !userData?.user) {
     console.error('Auth check failed:', authError?.message, authError?.status, authError)
@@ -274,20 +282,12 @@ export default async function handler(req, res) {
   // ever touches that user's own row, same trust model as the auth check
   // above. Fails open if the function/table doesn't exist yet or errors for
   // any other reason - a missing migration shouldn't take the whole app down.
-  const supabaseAsUser = createClient(
-    process.env.VITE_SUPABASE_URL,
-    process.env.VITE_SUPABASE_ANON_KEY,
-    { global: { headers: { Authorization: `Bearer ${token}` } } }
-  )
   // rl_check / rl_refund / rl_used come from radius_rate_limit_fix.sql. Requests
   // that end in a server-side failure (Google busy, etc.) are refunded, so a
   // student is only charged for answers they actually received. If that SQL has
   // not been run yet, the old check_rate_limit() is used instead.
   let usingRefundableLimit = true
-  let { data: rateLimitOk, error: rateLimitError } = await supabaseAsUser.rpc('rl_check', {
-    p_limit: 20,
-    p_window_minutes: 60,
-  })
+  let { data: rateLimitOk, error: rateLimitError } = await rlPromise
   if (rateLimitError) {
     usingRefundableLimit = false
     ;({ data: rateLimitOk, error: rateLimitError } = await supabaseAsUser.rpc('check_rate_limit', {
@@ -439,6 +439,7 @@ ${closingLine}`
 
   // ---- Optional live web search (see top of file) ----
   let searchResults = []
+  let searchPromise = null
   const searchEligible =
     tool === 'chat' &&
     !action &&
@@ -450,16 +451,10 @@ ${closingLine}`
     const q = assignmentText.replace(/^\[The student is replying to [\s\S]*?"\]\s*/i, '').trim().slice(0, 300)
     const casual = q.length < 15 || (/^(ok|okay|alright|thanks|thank you|thx|hello|hi|hey|sure|yes|yeah|no|cool|great|nice|good)\b/i.test(q) && !q.includes('?'))
     if (q && !casual && (process.env.SEARCH_ALWAYS === 'true' || SEARCH_HINTS.test(q))) {
-      searchResults = await webSearch(q)
+      searchPromise = webSearch(q)
     }
   }
-  const searchBlock = searchResults.length
-    ? `\n\n[WEB SEARCH RESULTS fetched just now (today is ${todayText}). They are newer than your training data. Base your answer on them for anything recent, refer to them as [1], [2] and so on when you use them, and if they do not answer the question, say so instead of guessing.]\n` +
-      searchResults.map((r, i) => `[${i + 1}] ${r.title} (${r.url})\n${r.content}`).join('\n\n')
-    : ''
-
   const currentParts = []
-  if (assignmentText) currentParts.push({ text: assignmentText + searchBlock })
 
   // Files are fetched server-side from their (already-uploaded) Supabase signed
   // URL rather than shipped as base64 in the request body. Vercel serverless
@@ -467,7 +462,7 @@ ${closingLine}`
   // PDF blows past that in one message and the whole request used to fail.
   // Fetching server-to-server here has no such limit, and doing it in
   // parallel keeps this from adding noticeable latency.
-  const fetchedParts = await Promise.all(
+  const filesPromise = Promise.all(
     imageList.map(async (img) => {
       if (!img || !img.url || !img.mimeType) return null
       try {
@@ -481,6 +476,15 @@ ${closingLine}`
       }
     })
   )
+  // Web search and file downloads run side by side; neither waits for the other.
+  const [searchDone, fetchedParts] = await Promise.all([searchPromise || Promise.resolve([]), filesPromise])
+  searchResults = searchDone
+  const searchBlock = searchResults.length
+    ? `\n\n[WEB SEARCH RESULTS fetched just now (today is ${todayText}). They are newer than your training data. Base your answer on them for anything recent, refer to them as [1], [2] and so on when you use them, and if they do not answer the question, say so instead of guessing.]\n` +
+      searchResults.map((r, i) => `[${i + 1}] ${r.title} (${r.url})\n${r.content}`).join('\n\n')
+    : ''
+
+  if (assignmentText) currentParts.unshift({ text: assignmentText + searchBlock })
   currentParts.push(...fetchedParts.filter(Boolean))
   contents.push({ role: 'user', parts: currentParts })
 
@@ -569,15 +573,30 @@ ${closingLine}`
   }
 
   let bestPartial = ''
+  const FIRST_TOKEN_MS = Number(process.env.FIRST_TOKEN_MS) || 9000
 
   async function tryGeminiStream(model) {
+    // If Gemini has not produced a single word after FIRST_TOKEN_MS, give up on
+    // this model and move to the next one instead of making the student wait.
+    const ac = new AbortController()
+    const overall = setTimeout(() => ac.abort(), 25000)
+    let firstTokenTimer = setTimeout(() => ac.abort(), FIRST_TOKEN_MS)
+    try {
+      return await tryGeminiStreamInner(model, ac, () => { clearTimeout(firstTokenTimer) })
+    } finally {
+      clearTimeout(overall)
+      clearTimeout(firstTokenTimer)
+    }
+  }
+
+  async function tryGeminiStreamInner(model, ac, onFirstToken) {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: geminiBodyFor(model),
-        signal: AbortSignal.timeout(25000),
+        signal: ac.signal,
       }
     )
     if (!response.ok) {
@@ -603,6 +622,7 @@ ${closingLine}`
       const parts = json?.candidates?.[0]?.content?.parts || []
       const piece = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
       if (piece) {
+        if (!sentDelta) onFirstToken()
         full += piece
         sentDelta = true
         emit({ t: 'delta', text: piece })
@@ -636,6 +656,73 @@ ${closingLine}`
     return { ok: true, text: full }
   }
 
+  // Same as tryCompat, but streams words to the app as they arrive, so the
+  // backup providers feel as fast as Gemini instead of showing nothing until
+  // the whole answer is ready.
+  async function tryCompatStream(provider) {
+    const ac = new AbortController()
+    const overall = setTimeout(() => ac.abort(), 25000)
+    const firstTimer = setTimeout(() => ac.abort(), 8000)
+    try {
+      const response = await fetch(provider.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env[provider.keyEnv]}` },
+        body: JSON.stringify({ model: provider.model, messages: chatMessages, max_tokens: 4096, stream: true }),
+        signal: ac.signal,
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => null)
+        return { ok: false, status: response.status, detail: data?.error?.message }
+      }
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let full = ''
+      let sentDelta = false
+      let finishReason = null
+      const handleLine = (line) => {
+        if (!line.startsWith('data:')) return
+        const payload = line.slice(5).trim()
+        if (!payload || payload === '[DONE]') return
+        let json
+        try { json = JSON.parse(payload) } catch (e) { return }
+        const choice = json?.choices?.[0]
+        if (choice?.finish_reason) finishReason = choice.finish_reason
+        const piece = choice?.delta?.content
+        if (typeof piece === 'string' && piece) {
+          if (!sentDelta) clearTimeout(firstTimer)
+          full += piece
+          sentDelta = true
+          emit({ t: 'delta', text: piece })
+        }
+      }
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop()
+          for (const line of lines) handleLine(line.trim())
+        }
+        if (buffer.trim()) handleLine(buffer.trim())
+      } catch (e) {
+        if (sentDelta) needsReset = true
+        return { ok: false, status: 502, detail: 'stream interrupted: ' + (e?.message || '') }
+      }
+      if (!full) return { ok: false, status: 502, detail: 'empty reply' }
+      if (finishReason === 'length') {
+        if (full.length > bestPartial.length) bestPartial = full
+        if (sentDelta) needsReset = true
+        return { ok: false, status: 502, detail: 'incomplete reply (length)' }
+      }
+      return { ok: true, text: full }
+    } finally {
+      clearTimeout(overall)
+      clearTimeout(firstTimer)
+    }
+  }
+
   async function tryCompat(provider) {
     const response = await fetch(provider.url, {
       method: 'POST',
@@ -659,6 +746,21 @@ ${closingLine}`
   }
 
   const attempts = []
+  const compatRun = (provider) => () => (wantStream ? tryCompatStream(provider) : tryCompat(provider))
+  // FAST LANE: plain written questions (non-calculative chat, no files, no web
+  // search) go to Groq first, which starts answering in well under a second.
+  // Maths, files, Study Pack, Project mode and web-search answers stay on
+  // Gemini, which is stronger at those. Set FAST_LANE=false in Vercel to turn
+  // this off.
+  const fastLane =
+    process.env.FAST_LANE !== 'false' &&
+    process.env.GROQ_API_KEY &&
+    tool === 'chat' && !action && mode !== 'calculative' &&
+    !hasFiles && searchResults.length === 0
+  if (fastLane) {
+    const groq = OPENAI_COMPAT_PROVIDERS.find((x) => x.name === 'groq')
+    attempts.push({ label: `groq:${groq.model}`, retryOnBusy: false, run: compatRun(groq) })
+  }
   if (geminiKey) {
     for (const model of GEMINI_MODELS) {
       attempts.push({ label: `gemini:${model}`, retryOnBusy: true, run: () => (wantStream ? tryGeminiStream(model) : tryGemini(model)) })
@@ -668,8 +770,8 @@ ${closingLine}`
   // Gemini can read them, so the fallback chain is skipped for those.
   if (!hasFiles) {
     for (const provider of OPENAI_COMPAT_PROVIDERS) {
-      if (process.env[provider.keyEnv]) {
-        attempts.push({ label: `${provider.name}:${provider.model}`, retryOnBusy: false, run: () => tryCompat(provider) })
+      if (process.env[provider.keyEnv] && !(fastLane && provider.name === 'groq')) {
+        attempts.push({ label: `${provider.name}:${provider.model}`, retryOnBusy: false, run: compatRun(provider) })
       }
     }
   }
@@ -734,6 +836,7 @@ ${closingLine}`
     // frontend should show assignment follow-up actions (hint/quiz/etc).
     // Defaults to 'general' (no chips) if the model ever forgets the tag.
     let responseType = 'general'
+    let pendingPush = null
     const tagMatch = text.match(/^\s*\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/i)
     if (tagMatch) {
       responseType = tagMatch[1].toLowerCase()
@@ -837,6 +940,7 @@ ${closingLine}`
       // The service worker skips showing it when RADIUS is open on screen.
       const tookMs = Date.now() - (Date.parse(requestStartedAt) + 1500)
       if (tookMs > 6000) {
+        pendingPush = async () => {
         try {
           await Promise.race([
             sendPushToUser(
@@ -848,6 +952,7 @@ ${closingLine}`
             new Promise((resolve) => setTimeout(resolve, 3000)),
           ])
         } catch (e) { /* best-effort */ }
+        }
       }
     }
 
@@ -855,9 +960,15 @@ ${closingLine}`
       // The final event carries the fully cleaned text (tag stripped, study
       // cards attached) and replaces whatever was streamed so far.
       emit({ t: 'done', result: text, responseType })
-      return res.end()
+      res.end()
+      // The answer is already on the student's screen; the notification is
+      // sent afterwards so it never delays the reply.
+      if (pendingPush) await pendingPush()
+      return
     }
-    return res.status(200).json({ result: text, responseType })
+    res.status(200).json({ result: text, responseType })
+    if (pendingPush) await pendingPush()
+    return
   } catch (err) {
     console.error('generate.js error:', err)
     return fail(500, "Something went wrong on RADIUS's end. Please try again.")
