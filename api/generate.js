@@ -500,7 +500,7 @@ ${closingLine}`
     // non-calculative mode, so 'low' is used everywhere.
     generationConfig: {
       thinkingConfig: { thinkingLevel: 'low' },
-      maxOutputTokens: 4096,
+      maxOutputTokens: 8192,
     },
   })
   // Gemini 2.5 does not accept thinkingLevel, so it gets the same request without it.
@@ -568,6 +568,8 @@ ${closingLine}`
     return res.status(status).json({ error: message })
   }
 
+  let bestPartial = ''
+
   async function tryGeminiStream(model) {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${geminiKey}`,
@@ -588,6 +590,7 @@ ${closingLine}`
     let buffer = ''
     let full = ''
     let sentDelta = false
+    let finishReason = null
 
     const handleLine = (line) => {
       if (!line.startsWith('data:')) return
@@ -595,6 +598,8 @@ ${closingLine}`
       if (!payload || payload === '[DONE]') return
       let json
       try { json = JSON.parse(payload) } catch (e) { return }
+      const fr = json?.candidates?.[0]?.finishReason
+      if (fr) finishReason = fr
       const parts = json?.candidates?.[0]?.content?.parts || []
       const piece = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
       if (piece) {
@@ -619,7 +624,15 @@ ${closingLine}`
       return { ok: false, status: 502, detail: 'stream interrupted: ' + (e?.message || '') }
     }
 
-    if (!full) return { ok: false, status: 502, detail: 'empty reply' }
+    if (!full) return { ok: false, status: 502, detail: 'empty reply (finishReason: ' + finishReason + ')' }
+    // A reply that did not end with a normal STOP was cut off by Gemini
+    // (token limit, safety filter, dropped stream). Do not treat it as a
+    // success: keep it as a last resort and try again / the next model.
+    if (finishReason !== 'STOP') {
+      if (full.length > bestPartial.length) bestPartial = full
+      if (sentDelta) needsReset = true
+      return { ok: false, status: 502, detail: 'incomplete reply, finishReason: ' + finishReason + ', chars: ' + full.length }
+    }
     return { ok: true, text: full }
   }
 
@@ -696,6 +709,12 @@ ${closingLine}`
         break
       }
       if (text !== null) break
+    }
+
+    if (text === null && bestPartial) {
+      // Every attempt was cut off. A partial answer beats an error, but say so.
+      text = bestPartial.trimEnd() + '\n\n_This reply was cut off. Tap Regenerate to get the full answer._'
+      console.error('Serving partial reply after all attempts were incomplete, chars:', bestPartial.length)
     }
 
     if (text === null) {
