@@ -295,7 +295,14 @@ export default async function handler(req, res) {
       p_window_minutes: 60,
     }))
   }
+  // Access lock (free message limits + unlock codes). Set to true once a
+  // message has been counted, so a failed reply can give it back.
+  let accessCharged = false
   async function refundQuota() {
+    if (accessCharged) {
+      accessCharged = false
+      try { await supabaseAsUser.rpc('refund_message') } catch (e) { /* best-effort */ }
+    }
     if (!usingRefundableLimit) return
     try { await supabaseAsUser.rpc('rl_refund') } catch (e) { /* best-effort */ }
   }
@@ -303,6 +310,28 @@ export default async function handler(req, res) {
     console.error('Rate limit check errored (failing open):', rateLimitError.message)
   } else if (rateLimitOk === false) {
     return res.status(429).json({ error: "You've hit the hourly limit for assignment requests. Please wait a bit and try again." })
+  }
+
+  // Access lock: users without an unlock code get a few free messages, then 2
+  // per day (see radius_access_lock.sql). Counted atomically in Postgres.
+  // Fails open if the SQL has not been run yet, so a missing migration cannot
+  // take the whole app down.
+  try {
+    const { data: access, error: accessError } = await supabaseAsUser.rpc('consume_message')
+    if (accessError) {
+      console.error('Access check errored (failing open):', accessError.message)
+    } else if (access && access.allowed === false) {
+      await refundQuota()
+      return res.status(402).json({
+        error: "You've used your free messages for today. Enter an unlock code, or request one, to keep chatting.",
+        code: 'LOCKED',
+        reason: access.reason || 'limit',
+      })
+    } else if (access && access.allowed === true) {
+      accessCharged = true
+    }
+  } catch (e) {
+    console.error('Access check threw (failing open):', e?.message)
   }
 
   const { subject, mode, assignmentText: rawAssignmentText, history, images, nickname, responseStyle, tool: rawTool, projectId, conversationId, kind: saveKind, replaceLast } = req.body
