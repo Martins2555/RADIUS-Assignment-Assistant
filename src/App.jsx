@@ -649,6 +649,12 @@ function AuthScreen({ initialSignUp = true }) {
       <p className="fade-in-3" style={styles.toggle} onClick={() => setIsSignUp(!isSignUp)}>
         {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
       </p>
+      <p className="fade-in-3" style={{ ...styles.toggle, marginTop: '0.4rem' }}>
+        Need an access code?{' '}
+        <a href={requestCodeUrl('')} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', fontWeight: 'bold' }}>
+          REQUEST FOR UNLOCK CODE
+        </a>
+      </p>
       {message && <p style={styles.message}>{message}</p>}
     </div>
   )
@@ -724,6 +730,112 @@ function AboutScreen({ theme, accentColor, onBack }) {
             understand and can defend. RADIUS will tell you when it is unsure rather than invent facts, data or sources.
           </p>
         </SettingsCard>
+      </div>
+    </div>
+  )
+}
+
+// ---- Access lock (free message limits + unlock codes) ----
+// The "REQUEST FOR UNLOCK CODE" button opens your X profile (@RadiusMO) until you set
+// X_USER_ID below. Once you have your numeric X user ID, paste it in as a
+// string, e.g. '1234567890123456789'. The button then opens a ready DM with
+// the message and the student's email already filled in.
+const X_HANDLE = 'RadiusMO'
+const X_USER_ID = '1817816481905680385'
+function requestCodeUrl(email) {
+  if (!X_USER_ID) return `https://x.com/${X_HANDLE}`
+  const msg = `Hi, I'd like an unlock code for RADIUS. My account email is ${email || '(your email)'}. How do I pay?`
+  return `https://x.com/messages/compose?recipient_id=${X_USER_ID}&text=${encodeURIComponent(msg)}`
+}
+
+function LockModal({ theme, accentColor, access, email, onClose, onRedeemed }) {
+  const c = getPalette(theme, accentColor)
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [ok, setOk] = useState(false)
+
+  async function redeem() {
+    if (!code.trim() || busy) return
+    setBusy(true)
+    setMsg('')
+    try {
+      const { data, error: rpcError } = await supabase.rpc('redeem_code', { p_code: code })
+      if (rpcError) throw rpcError
+      if (data && data.ok) {
+        setOk(true)
+        setMsg('Unlocked! You now have full access to RADIUS.')
+        onRedeemed()
+      } else if (data && data.reason === 'too_many_attempts') {
+        setMsg('Too many wrong attempts. Please wait 15 minutes and try again.')
+      } else {
+        setMsg('That code is not valid or has already been used.')
+      }
+    } catch (e) {
+      setMsg('Could not check the code right now. Please try again.')
+    }
+    setBusy(false)
+  }
+
+  const limitReached = access && access.mode === 'daily' && access.daily_left <= 0
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.2rem' }}>
+      <div style={{ backgroundColor: c.surface, border: `1px solid ${c.border}`, borderRadius: '16px', padding: '1.4rem', maxWidth: '360px', width: '100%' }}>
+        <p style={{ fontSize: '1.05rem', fontWeight: 'bold', color: c.text, margin: '0 0 0.4rem' }}>
+          {ok ? 'You are unlocked' : limitReached ? 'Free messages used up' : 'Unlock RADIUS'}
+        </p>
+        {!ok && (
+          <p style={{ fontSize: '0.85rem', color: c.subtext, margin: '0 0 1rem', lineHeight: 1.5 }}>
+            {limitReached
+              ? 'You have used your free messages for today (they reset at midnight). Enter an unlock code for unlimited chatting.'
+              : 'Enter your unlock code for unlimited chatting. Each code works for one account only.'}
+          </p>
+        )}
+        {!ok && (
+          <input
+            autoFocus
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            onKeyDown={(e) => { if (e.key === 'Enter') redeem() }}
+            placeholder="RAD-XXXX-XXXX-XXXX"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '0.7rem 0.9rem', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.bg, color: c.text, fontSize: '0.95rem', letterSpacing: '0.05em', marginBottom: '0.8rem', outline: 'none' }}
+          />
+        )}
+        {msg && <p style={{ fontSize: '0.82rem', color: ok ? '#22c55e' : '#f87171', margin: '0 0 0.8rem' }}>{msg}</p>}
+        {!ok && (
+          <button
+            onClick={redeem}
+            disabled={busy || !code.trim()}
+            style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', border: 'none', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold', cursor: 'pointer', fontSize: '0.92rem', opacity: busy || !code.trim() ? 0.6 : 1, marginBottom: '0.6rem' }}
+          >
+            {busy ? 'Checking...' : 'Unlock'}
+          </button>
+        )}
+        {!ok && (
+          <a
+            href={requestCodeUrl(email)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'block', textAlign: 'center', width: '100%', boxSizing: 'border-box', padding: '0.75rem', borderRadius: '10px', border: `1px solid ${c.accent}`, color: c.accent, fontWeight: 'bold', textDecoration: 'none', fontSize: '0.88rem', marginBottom: '0.6rem' }}
+          >
+            REQUEST FOR UNLOCK CODE to continue chatting
+          </a>
+        )}
+        {!ok && !X_USER_ID && (
+          <p style={{ fontSize: '0.74rem', color: c.subtext, textAlign: 'center', margin: '0 0 0.6rem', lineHeight: 1.4 }}>
+            On my X profile, tap the message icon and send me your account email{email ? ` (${email})` : ''}.
+          </p>
+        )}
+        <button
+          onClick={onClose}
+          style={{ width: '100%', padding: '0.6rem', borderRadius: '10px', border: 'none', backgroundColor: 'transparent', color: c.subtext, cursor: 'pointer', fontSize: '0.85rem' }}
+        >
+          {ok ? 'Continue' : 'Not now'}
+        </button>
       </div>
     </div>
   )
@@ -2755,6 +2867,8 @@ function Dashboard({ session }) {
   const [mode, setMode] = useState('calculative')
   const [tool, setTool] = useState('chat')
   const [usedThisHour, setUsedThisHour] = useState(null)
+  const [access, setAccess] = useState(null)
+  const [lockOpen, setLockOpen] = useState(false)
   const [replyTo, setReplyTo] = useState(null)
   const [subject, setSubject] = useState('')
   const [assignmentText, setAssignmentText] = useState('')
@@ -2937,7 +3051,19 @@ function Dashboard({ session }) {
   // Counts this user's messages from the last hour. Each one is a request to
   // the backend, so this matches the hourly limit closely without needing
   // any new database function.
+  async function fetchAccess() {
+    try {
+      const { data, error: accessError } = await supabase.rpc('get_access_status')
+      if (!accessError && data && data.mode) setAccess(data)
+    } catch (e) { /* lock SQL may not be installed yet */ }
+  }
+
+  function accessBlocked() {
+    return !!(access && access.mode === 'daily' && access.daily_left <= 0)
+  }
+
   async function fetchUsage() {
+    fetchAccess()
     try {
       // Preferred: the server's own count (what the limit actually enforces).
       const { data: serverCount, error: serverError } = await supabase.rpc('rl_used', { p_window_minutes: 60 })
@@ -3433,6 +3559,10 @@ function Dashboard({ session }) {
       if (!response.ok || !contentType.includes('ndjson')) {
         // Normal JSON answer: an error, or a backend that doesn't stream yet.
         const data = await response.json().catch(() => ({}))
+        if (response.status === 402) {
+          setLockOpen(true)
+          fetchAccess()
+        }
         if (!response.ok) throw new Error(data.error || 'Something went wrong.')
         await finish(data.result, data.responseType)
       } else {
@@ -3610,6 +3740,10 @@ function Dashboard({ session }) {
     if (!assignmentText.trim() && attachedFiles.length === 0) return
     if (tool === 'project' && !activeProject) {
       setError('Pick or create a project first, then ask your question.')
+      return
+    }
+    if (accessBlocked()) {
+      setLockOpen(true)
       return
     }
 
@@ -3840,6 +3974,10 @@ function Dashboard({ session }) {
 
   // One request that does not touch the chat history (hints, summaries, quizzes).
   async function generateOnce(action, userText) {
+    if (accessBlocked()) {
+      setLockOpen(true)
+      throw new Error('You have used your free messages for today. Enter a code to continue.')
+    }
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
@@ -3856,6 +3994,12 @@ function Dashboard({ session }) {
       }),
     })
     const data = await response.json().catch(() => ({}))
+    if (response.status === 402) {
+      setLockOpen(true)
+      fetchAccess()
+    } else if (response.ok) {
+      fetchAccess()
+    }
     if (!response.ok) throw new Error(data.error || 'Something went wrong.')
     return data
   }
@@ -4144,6 +4288,17 @@ function Dashboard({ session }) {
         onReply={startReply}
       />
 
+      {lockOpen && (
+        <LockModal
+          theme={theme}
+          accentColor={accentColor}
+          access={access}
+          email={session?.user?.email || ''}
+          onClose={() => setLockOpen(false)}
+          onRedeemed={() => fetchAccess()}
+        />
+      )}
+
       {showNicknamePrompt && (
         <NicknamePrompt
           theme={theme}
@@ -4318,6 +4473,20 @@ function Dashboard({ session }) {
           </button>
         ))}
       </div>
+
+      {access && access.mode !== 'unlocked' && access.mode !== 'unauthenticated' && (
+        <p style={{ margin: '0 1.2rem 0.4rem 1.2rem', fontSize: '0.72rem', textAlign: 'right', color: accessBlocked() ? '#f59e0b' : c.subtext }}>
+          {access.mode === 'trial'
+            ? `Free access ends in ${Math.max(1, Math.ceil((new Date(access.trial_ends_at) - Date.now()) / 3600000))}h`
+            : access.mode === 'grace'
+              ? `${access.grace_left} free message${access.grace_left === 1 ? '' : 's'} left`
+              : `${access.daily_left} of 2 free messages left today`}
+          {' · '}
+          <span onClick={() => setLockOpen(true)} style={{ cursor: 'pointer', textDecoration: 'underline', fontWeight: 'bold' }}>
+            {accessBlocked() ? 'REQUEST FOR UNLOCK CODE to continue chatting' : 'Enter code'}
+          </span>
+        </p>
+      )}
 
       {usedThisHour !== null && (
         <p style={{ margin: '0 1.2rem 0.4rem 1.2rem', fontSize: '0.72rem', textAlign: 'right', color: usedThisHour >= HOURLY_LIMIT - 3 ? '#f59e0b' : c.subtext }}>
