@@ -652,7 +652,11 @@ function AuthScreen({ initialSignUp = true }) {
       <p className="fade-in-3" style={{ ...styles.toggle, marginTop: '0.4rem' }}>
         Need an access code?{' '}
         <a href={requestCodeUrl('')} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', fontWeight: 'bold' }}>
-          REQUEST FOR UNLOCK CODE
+          REQUEST ON X
+        </a>
+        {' or '}
+        <a href={requestCodeWhatsappUrl('')} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', fontWeight: 'bold' }}>
+          WHATSAPP
         </a>
       </p>
       {message && <p style={styles.message}>{message}</p>}
@@ -748,6 +752,12 @@ function requestCodeUrl(email) {
   return `https://x.com/messages/compose?recipient_id=${X_USER_ID}&text=${encodeURIComponent(msg)}`
 }
 
+const WHATSAPP_NUMBER = '2347013892555'
+function requestCodeWhatsappUrl(email) {
+  const msg = `Hi, I'd like an unlock code for RADIUS. My account email is ${email || '(your email)'}. How do I pay?`
+  return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`
+}
+
 function LockModal({ theme, accentColor, access, email, onClose, onRedeemed }) {
   const c = getPalette(theme, accentColor)
   const [code, setCode] = useState('')
@@ -810,7 +820,7 @@ function LockModal({ theme, accentColor, access, email, onClose, onRedeemed }) {
           <button
             onClick={redeem}
             disabled={busy || !code.trim()}
-            style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', border: 'none', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold', cursor: 'pointer', fontSize: '0.92rem', opacity: busy || !code.trim() ? 0.6 : 1, marginBottom: '0.6rem' }}
+            style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', border: `1px solid ${c.accent}`, backgroundColor: 'transparent', color: c.accent, fontWeight: 'bold', cursor: 'pointer', fontSize: '0.92rem', opacity: busy || !code.trim() ? 0.6 : 1, marginBottom: '0.8rem' }}
           >
             {busy ? 'Checking...' : 'Unlock'}
           </button>
@@ -820,9 +830,19 @@ function LockModal({ theme, accentColor, access, email, onClose, onRedeemed }) {
             href={requestCodeUrl(email)}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ display: 'block', textAlign: 'center', width: '100%', boxSizing: 'border-box', padding: '0.75rem', borderRadius: '10px', border: `1px solid ${c.accent}`, color: c.accent, fontWeight: 'bold', textDecoration: 'none', fontSize: '0.88rem', marginBottom: '0.6rem' }}
+            style={{ display: 'block', textAlign: 'center', width: '100%', boxSizing: 'border-box', padding: '0.9rem 0.8rem', borderRadius: '12px', border: 'none', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold', textDecoration: 'none', fontSize: '0.92rem', lineHeight: 1.3, boxShadow: '0 4px 14px rgba(0,0,0,0.25)', marginBottom: '0.6rem' }}
           >
             REQUEST FOR UNLOCK CODE to continue chatting
+          </a>
+        )}
+        {!ok && (
+          <a
+            href={requestCodeWhatsappUrl(email)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'block', textAlign: 'center', width: '100%', boxSizing: 'border-box', padding: '0.9rem 0.8rem', borderRadius: '12px', border: 'none', backgroundColor: '#25D366', color: '#06290f', fontWeight: 'bold', textDecoration: 'none', fontSize: '0.92rem', lineHeight: 1.3, boxShadow: '0 4px 14px rgba(0,0,0,0.25)', marginBottom: '0.6rem' }}
+          >
+            REQUEST ON WHATSAPP
           </a>
         )}
         {!ok && !X_USER_ID && (
@@ -4481,11 +4501,26 @@ function Dashboard({ session }) {
             : access.mode === 'grace'
               ? `${access.grace_left} free message${access.grace_left === 1 ? '' : 's'} left`
               : `${access.daily_left} of 2 free messages left today`}
-          {' · '}
-          <span onClick={() => setLockOpen(true)} style={{ cursor: 'pointer', textDecoration: 'underline', fontWeight: 'bold' }}>
-            {accessBlocked() ? 'REQUEST FOR UNLOCK CODE to continue chatting' : 'Enter code'}
-          </span>
+          {!accessBlocked() && (
+            <>
+              {' · '}
+              <span onClick={() => setLockOpen(true)} style={{ cursor: 'pointer', textDecoration: 'underline', fontWeight: 'bold' }}>
+                Enter code
+              </span>
+            </>
+          )}
         </p>
+      )}
+      {accessBlocked() && (
+        <div style={{ margin: '0 1rem 0.5rem 1rem', flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => setLockOpen(true)}
+            style={{ width: '100%', padding: '0.75rem 0.9rem', borderRadius: '12px', border: 'none', backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold', fontSize: '0.85rem', lineHeight: 1.3, cursor: 'pointer', boxShadow: '0 4px 14px rgba(0,0,0,0.25)' }}
+          >
+            REQUEST FOR UNLOCK CODE to continue chatting
+          </button>
+        </div>
       )}
 
       {usedThisHour !== null && (
