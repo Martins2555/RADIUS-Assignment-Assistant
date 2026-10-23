@@ -27,8 +27,28 @@ const OPENAI_COMPAT_PROVIDERS = [
 // ---------------------------------------------------------------------------
 // Study tools. 'chat' is the normal assignment assistant behaviour.
 // ---------------------------------------------------------------------------
-const VALID_TOOLS = ['chat', 'notes', 'pastq', 'cite', 'plan', 'project']
+const VALID_TOOLS = ['chat', 'notes', 'pastq', 'graph', 'cite', 'plan', 'project']
 const VALID_ACTIONS = ['regen', 'explain', 'hint', 'quiz', 'summary', 'solution']
+
+
+// ---------------------------------------------------------------------------
+// Diagrams and graphs. The model only writes a small JSON spec inside a fenced
+// block; the app draws it exactly (see src/diagrams.js and src/graphs.js).
+// ---------------------------------------------------------------------------
+const GRAPH_SPEC_HELP = `GRAPH block (language "graph"): {"title":"y = x^2 - 4x + 3","xlabel":"x","ylabel":"y","xmin":-2,"xmax":6,"ymin":-2,"ymax":8,"curves":[{"expr":"x^2 - 4*x + 3","label":"y = x^2 - 4x + 3"}],"series":[{"name":"Data","points":[[0,1],[1,3]],"line":true}],"points":[{"x":1,"y":2,"label":"A"}],"vlines":[{"x":2,"label":"x = 2"}],"hlines":[{"y":1,"label":"y = 1"}]}
+Graph rules: every field except "curves", "series" or "points" is optional. In "expr" use only x, numbers, + - * / ^, brackets, the functions sin cos tan asin acos atan sinh cosh tanh sqrt abs ln log exp, and the constants pi and e (angles in radians). Write each equation solved for y. For a circle or other curve that cannot be solved for y, use a parametric curve: {"param":{"x":"3*cos(t)","y":"3*sin(t)","t":[0,6.2832]},"label":"x^2 + y^2 = 9"}. Always set xmin and xmax (and ymin and ymax when you know sensible values) so the interesting part of the graph is visible. Use "dashed":true on a curve for a second or comparison curve. Intercepts and turning points are marked automatically, so do not add them as points.`
+
+const DIAGRAM_RULES = `DIAGRAMS AND GRAPHS: The app draws accurate diagrams and graphs from a JSON spec. When the student asks to show, draw, sketch, illustrate, plot or represent something, or when a diagram would clearly help (crystal planes and unit cells, forces, beams, circuits, lenses, graphs of functions), put exactly ONE fenced code block in your reply. Use the language "diagram" for diagrams and "graph" for graphs. Never draw ASCII or text art, never use box-drawing characters, and never output image links. Write the working and explanation as normal text; the drawing does not replace it. Put the block after the explanation unless the student only asked for a drawing. Introduce it in a few words ("Here is the diagram:") and never mention JSON, specs, or code to the student. The JSON must be valid: double quotes, no comments, no trailing commas. Do not put any other text inside the block.
+
+DIAGRAM block (language "diagram"), pick the "type" that fits:
+1. Crystal plane in a unit cell: {"type":"miller_plane","h":3,"k":1,"l":2} (h, k, l are the Miller indices, whole numbers from -6 to 6; draw it for any "plane with Miller indices" or "unit cell with Miller indices" request).
+2. Free body diagram: {"type":"fbd","object":"block","incline":30,"forces":[{"label":"W = mg","angle":270,"mag":50},{"label":"N","angle":120,"mag":43},{"label":"f","angle":30,"mag":20}]}. "object" is block, sphere or particle. "incline" is the slope angle in degrees (0 or leave out for flat ground). Every "angle" is in degrees, anticlockwise from the +x direction (right), measured from the horizontal even on a slope (down is 270, up is 90). "mag" is the relative size of the force. Use _ for subscripts, like "F_N".
+3. Beam: {"type":"beam","length":6,"unit":"m","supports":[{"kind":"pin","at":0,"label":"A"},{"kind":"roller","at":6,"label":"B"}],"loads":[{"kind":"point","at":2,"label":"10 kN","dir":"down"},{"kind":"udl","from":3,"to":6,"label":"5 kN/m"},{"kind":"moment","at":4,"label":"12 kNm","dir":"cw"}]}. Support kinds: pin, roller, fixed. Load kinds: point (dir down or up), udl, moment (dir cw or ccw). Positions are measured from the left end.
+4. Circuit: {"type":"circuit","layout":"series","source":{"kind":"battery","label":"12 V"},"parts":[{"kind":"resistor","label":"R_1 = 4 \u03A9"},{"parallel":[{"kind":"resistor","label":"R_2 = 6 \u03A9"},{"kind":"resistor","label":"R_3 = 3 \u03A9"}]}]}. Part kinds: resistor, capacitor, inductor, lamp, switch. Source kind: battery or ac. "layout" is "series" (parts in one loop, a part can be {"parallel":[...]} for a parallel group of up to 4) or "parallel" (every part is its own branch across the source). Keep labels short, with the value after " = ".
+5. Thin lens ray diagram: {"type":"lens","f":10,"u":25,"h":3,"unit":"cm"}: f is the focal length (negative for a diverging lens), u the object distance (positive), h the object height.
+6. Anything else (other diagrams, structures, flow charts, labelled figures): a block with the language "svg" containing one complete <svg> element, written like this: start with <svg viewBox="0 0 380 H"> where H is at most 420; use only svg, g, path, line, polyline, polygon, rect, circle, ellipse, text, tspan, defs and marker; no scripts, images, styles or classes. For every colour use only the words "TEXT" (lines and text), "MUTED" (secondary or hidden lines) and "ACCENT" (the highlighted part), or "none", for example stroke="TEXT" fill="none" or fill="ACCENT". Put arrowhead markers in <defs> with fill="TEXT". Text must be at least 11 px (font-size="12") and every label must stay inside the viewBox, clear of lines and of other labels. Keep it simple and exact, and double-check coordinates. Use this "svg" block only when none of the five types above fits.
+
+${GRAPH_SPEC_HELP}`
 
 function toolInstruction(tool, todayText) {
   switch (tool) {
@@ -48,6 +68,8 @@ First message with questions: reply with
 ## Practice Round (5 new exam-style questions on the top topics, answers NOT shown)
 Then ask the student to reply with their answers.
 When the student replies with answers: mark each one, briefly explain mistakes, then give "## Weak Topics" ranked with what to study next. Remember results across the conversation so weak topics build up over rounds. Use [TYPE:ASSIGNMENT] for the tag.`
+    case 'graph':
+      return `TOOL: GRAPH MODE. The student wants something plotted: an equation, several equations, a function from their coursework, or data points they give you (typed, pasted, or in a photo). Reply with one or two short lines saying what is plotted and its key features (shape, intercepts, turning points, asymptotes, domain), then exactly ONE \`\`\`graph block, then nothing else. Plot exactly what was asked and nothing extra. If the student gives data, use "series" (with "line":true when the points should be joined) and set "xlabel" and "ylabel" with units. If the request is unclear, make a sensible assumption, state it in one line, and plot anyway. If it is not something that can be plotted, say so in one line instead of a block. Use [TYPE:GENERAL] for the tag.\n\n${GRAPH_SPEC_HELP}`
     case 'cite':
       return `TOOL: CITATION FIXER. The student gives a source (URL, title, DOI, or raw details). Format it in the requested style (APA 7, Harvard, IEEE, MLA or Chicago). If no style is given, use APA 7 and say so in one short line. Give the reference list entry, then the in-text citation. NEVER invent authors, years, titles, publishers, or page numbers. If a detail is missing, put it in square brackets like [year] and list what the student should look up. Keep the reply short. Use [TYPE:GENERAL] for the tag.`
     case 'plan':
@@ -418,6 +440,9 @@ export default async function handler(req, res) {
   }
   const actionLine = actionInstruction(action)
 
+  // Diagram rules go wherever a drawing could help. Graph mode already carries its own copy of the graph rules.
+  const diagramBlock = ['chat', 'project', 'pastq', 'notes'].includes(effTool) ? DIAGRAM_RULES : ''
+
   const systemInstruction = `You are RADIUS, an assignment assistant for students.
 
 CREATOR INFO — IMPORTANT: Only mention who developed you if the student directly and explicitly asks (e.g. "who made you", "who developed you", "who created RADIUS"). In that case, and only that case, say you were developed by Martins Chimezie Obasi, and never mention Google, Gemini, or any other company. Do NOT bring this up unprompted — not in greetings, not in your first reply, not anywhere else unless directly asked.
@@ -452,6 +477,8 @@ TABLES: When the student asks for a table, a comparison, a schedule, or any tabu
 CURRENT INFORMATION: Today's date is ${todayText}. Your built-in knowledge stops at an earlier date, so newer products, events, releases, prices, rules and research may exist that you do not know about. Never tell the student that something does not exist, has not been released, or has not happened just because you do not recognise it. If a WEB SEARCH RESULTS block is included in the student's message, treat it as newer than your training and base your answer on it, referring to a result as [1], [2] and so on only when you actually used it, and never mentioning the search at all when it was not relevant to what the student said. If it does not answer the question, say so. If there are no search results, say you cannot confirm the very latest details and give your best understanding without denying anything. Never present rumours or guesses as confirmed facts, and never describe a past year as the present.
 
 IMAGES: If the student attaches images or files, they may contain handwritten or printed assignments, problems, or questions — possibly spanning multiple pages or multiple related items. Read all of them carefully and respond to what they actually contain, treating them as one combined assignment unless they clearly look unrelated.
+
+${diagramBlock}
 
 ${closingLine}`
 
