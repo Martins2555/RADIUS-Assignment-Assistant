@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import { renderToStaticMarkup } from 'react-dom/server'
 import 'katex/dist/katex.min.css'
+import { diagramComponents, stripDiagrams } from './DiagramBlock.jsx'
 
 // ---- PWA install prompt -----------------------------------------------------
 // The browser fires this event once, early, so it is captured at module level
@@ -1461,7 +1462,7 @@ function splitStudy(content) {
 function buildHistory(msgs) {
   const out = []
   for (const m of msgs || []) {
-    const text = splitStudy(m.content).text
+    const text = stripDiagrams(splitStudy(m.content).text, '[Diagram shown to the student]')
     if (!text) continue
     const last = out[out.length - 1]
     if (last && last.role === m.role) last.content += '\n\n' + text
@@ -1736,6 +1737,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, defaul
             remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
             rehypePlugins={[rehypeKatex]}
             components={{
+              ...diagramComponents(c),
               blockquote: ({ node, ...rest }) => (
                 <blockquote {...rest} className="reply-quote" style={{ margin: '0 0 0.55rem 0', padding: '0.45rem 0.7rem', borderLeft: `4px solid ${isUser ? 'rgba(255,255,255,0.75)' : c.accent}`, backgroundColor: isUser ? 'rgba(0,0,0,0.14)' : c.surfaceAlt, borderRadius: '10px', fontSize: '0.82rem', lineHeight: 1.4 }} />
               ),
@@ -2253,6 +2255,7 @@ function MarkdownBlock({ text, c }) {
         remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={{
+          ...diagramComponents(c),
           table: ({ node, ...rest }) => (
             <div data-noswipe="true" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '0.5rem 0 0.8rem', borderRadius: '10px', border: `1px solid ${c.border}` }}>
               <table {...rest} style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem' }} />
@@ -3031,11 +3034,11 @@ function Dashboard({ session }) {
   }, [])
 
   function handleCopyText(text) {
-    navigator.clipboard?.writeText(text || '')
+    navigator.clipboard?.writeText(stripDiagrams(text || ''))
   }
 
   function handleShareText(text) {
-    const clean = text || ''
+    const clean = stripDiagrams(text || '')
     if (navigator.share) {
       navigator.share({ title: 'RADIUS', text: clean }).catch(() => {})
     } else {
@@ -3048,7 +3051,7 @@ function Dashboard({ session }) {
   function handleExportPdf(text) {
     try {
       const html = renderToStaticMarkup(
-        <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]} rehypePlugins={[rehypeKatex]}>{text || ''}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]} rehypePlugins={[rehypeKatex]} components={diagramComponents(getPalette('light', accentColor), true)}>{text || ''}</ReactMarkdown>
       )
       const pageCss = Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).map((n) => n.outerHTML).join('\n')
       const iframe = document.createElement('iframe')
@@ -3106,7 +3109,7 @@ function Dashboard({ session }) {
   // Start replying to a message: shows a quote bar above the input. The quote
   // is saved at the top of the sent message and also given to the AI as context.
   function startReply(role, content) {
-    const clean = splitStudy(content || '').text
+    const clean = stripDiagrams(splitStudy(content || '').text, '[Diagram]')
       .replace(/^>.*$/gm, '')
       .replace(/!\[[^\]]*\]\([^)]*\)/g, '[image]')
       .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -4843,6 +4846,7 @@ const TOOLS = [
   { id: 'chat', label: 'Assignment' },
   { id: 'notes', label: 'Study Pack' },
   { id: 'pastq', label: 'Past Qs' },
+  { id: 'graph', label: 'Graph' },
   { id: 'cite', label: 'Citation' },
   { id: 'plan', label: 'Exam Plan' },
   { id: 'project', label: 'Project' },
@@ -4868,6 +4872,16 @@ const TOOL_INFO = {
       'Reply with your answers. RADIUS marks them and shows your weak topics.',
     ],
     tip: 'Tip: the more past papers you add, the better the topic map.',
+  },
+  graph: {
+    title: 'Graph Mode',
+    summary: 'Plot any equation or your own data as a clean, accurate graph.',
+    steps: [
+      'Type an equation like y = x^2 - 4x + 3, several equations, or paste your data points.',
+      'RADIUS draws the graph with labelled axes, intercepts and turning points.',
+      'Tap Explore to drag and zoom the graph, or Save image to share it.',
+    ],
+    tip: 'Example: "Plot sin(x) and cos(x) from -2pi to 2pi"',
   },
   cite: {
     title: 'Citation Fixer',
@@ -4895,6 +4909,7 @@ const TOOL_PLACEHOLDERS = {
   chat: 'Type your assignment here...',
   notes: 'Paste or attach your lecture notes...',
   pastq: 'Paste or attach past questions for a course...',
+  graph: 'Type an equation or paste data to plot...',
   cite: 'Paste a link, title, or DOI to get a reference...',
   plan: 'List your exams, dates, topics and hours per day...',
   project: 'Ask anything about your project material...',
