@@ -38,7 +38,7 @@ const VALID_ACTIONS = ['regen', 'explain', 'hint', 'quiz', 'summary', 'solution'
 const GRAPH_SPEC_HELP = `GRAPH block (language "graph"): {"title":"y = x^2 - 4x + 3","xlabel":"x","ylabel":"y","xmin":-2,"xmax":6,"ymin":-2,"ymax":8,"curves":[{"expr":"x^2 - 4*x + 3","label":"y = x^2 - 4x + 3"}],"series":[{"name":"Data","points":[[0,1],[1,3]],"line":true}],"points":[{"x":1,"y":2,"label":"A"}],"vlines":[{"x":2,"label":"x = 2"}],"hlines":[{"y":1,"label":"y = 1"}]}
 Graph rules: every field except "curves", "series" or "points" is optional. In "expr" use only x, numbers, + - * / ^, brackets, the functions sin cos tan asin acos atan sinh cosh tanh sqrt abs ln log exp, and the constants pi and e (angles in radians). Write each equation solved for y. For a circle or other curve that cannot be solved for y, use a parametric curve: {"param":{"x":"3*cos(t)","y":"3*sin(t)","t":[0,6.2832]},"label":"x^2 + y^2 = 9"}. Always set xmin and xmax (and ymin and ymax when you know sensible values) so the interesting part of the graph is visible. Use "dashed":true on a curve for a second or comparison curve. Intercepts and turning points are marked automatically, so do not add them as points.`
 
-const DIAGRAM_RULES = `DIAGRAMS AND GRAPHS: The app draws accurate diagrams and graphs from a JSON spec. When the student asks to show, draw, sketch, illustrate, plot or represent something, or when a diagram would clearly help (crystal planes and unit cells, forces, beams, circuits, lenses, graphs of functions), put exactly ONE fenced code block in your reply. Use the language "diagram" for diagrams and "graph" for graphs. Never draw ASCII or text art, never use box-drawing characters, and never output image links. Write the working and explanation as normal text; the drawing does not replace it. Put the block after the explanation unless the student only asked for a drawing. Introduce it in a few words ("Here is the diagram:") and never mention JSON, specs, or code to the student. The JSON must be valid: double quotes, no comments, no trailing commas. Do not put any other text inside the block.
+const DIAGRAM_RULES = `DIAGRAMS AND GRAPHS: The app draws accurate diagrams and graphs from a JSON spec. When the student asks to show, draw, sketch, illustrate, plot or represent something, or when a diagram would clearly help (crystal planes and unit cells, forces, beams, circuits, lenses, graphs of functions), put exactly ONE fenced code block in your reply. Use the language "diagram" for diagrams and "graph" for graphs. The block must be written with the fence lines on their own lines: a line containing only \`\`\`diagram (or \`\`\`graph), then the JSON, then a line containing only \`\`\`. Never show the JSON without the fence. Never draw ASCII or text art, never use box-drawing characters, and never output image links. Write the working and explanation as normal text; the drawing does not replace it. Put the block after the explanation unless the student only asked for a drawing. Introduce it in a few words ("Here is the diagram:") and never mention JSON, specs, or code to the student. The JSON must be valid: double quotes, no comments, no trailing commas. Do not put any other text inside the block.
 
 DIAGRAM block (language "diagram"), pick the "type" that fits:
 1. Crystal plane in a unit cell: {"type":"miller_plane","h":3,"k":1,"l":2} (h, k, l are the Miller indices, whole numbers from -6 to 6; draw it for any "plane with Miller indices" or "unit cell with Miller indices" request).
@@ -544,6 +544,26 @@ ${closingLine}`
   currentParts.push(...fetchedParts.filter(Boolean))
   contents.push({ role: 'user', parts: currentParts })
 
+  // ---- Resilience state -------------------------------------------------
+  // If a reply breaks off part-way (Gemini overloaded, dropped stream, token
+  // limit), the text already shown to the student is kept in `carry` and the
+  // next provider is asked to CONTINUE from there, instead of starting over
+  // or leaving a cut-off answer.
+  let carry = ''
+  const DEADLINE = Date.now() + 52000 // Vercel stops the function at 60s
+  const CONTINUE_NOTE =
+    'Continue your previous reply exactly where it stopped. Do not repeat anything already written, do not start over, and finish any equation, table or code block that was left open.'
+  const IDLE_MS = Number(process.env.IDLE_MS) || 15000
+
+  // The new provider may repeat the last few words. Drop the repeated start.
+  function trimOverlap(prefix, t) {
+    const max = Math.min(80, t.length, prefix.length)
+    for (let k = max; k >= 10; k--) {
+      if (prefix.endsWith(t.slice(0, k))) return t.slice(k)
+    }
+    return t
+  }
+
   // ---- Build the list of providers to try, in order ----
   const hasFiles = currentParts.some((p) => p.inline_data)
   const geminiKey = process.env.GEMINI_API_KEY
@@ -569,7 +589,13 @@ ${closingLine}`
     delete o.generationConfig.thinkingConfig
     return JSON.stringify(o)
   })()
-  const geminiBodyFor = (model) => (model.startsWith('gemini-3') ? geminiBodyGemini3 : geminiBodyOlder)
+  const geminiBodyFor = (model) => {
+    const base = model.startsWith('gemini-3') ? geminiBodyGemini3 : geminiBodyOlder
+    if (!carry) return base
+    const o = JSON.parse(base)
+    o.contents = [...o.contents, { role: 'model', parts: [{ text: carry }] }, { role: 'user', parts: [{ text: CONTINUE_NOTE }] }]
+    return JSON.stringify(o)
+  }
 
   // Plain text version of the conversation for the non-Gemini providers.
   const chatMessages = [
@@ -631,21 +657,68 @@ ${closingLine}`
   let bestPartial = ''
   const FIRST_TOKEN_MS = Number(process.env.FIRST_TOKEN_MS) || 9000
 
-  async function tryGeminiStream(model) {
-    // If Gemini has not produced a single word after FIRST_TOKEN_MS, give up on
-    // this model and move to the next one instead of making the student wait.
-    const ac = new AbortController()
-    const overall = setTimeout(() => ac.abort(), 25000)
-    let firstTokenTimer = setTimeout(() => ac.abort(), FIRST_TOKEN_MS)
-    try {
-      return await tryGeminiStreamInner(model, ac, () => { clearTimeout(firstTokenTimer) })
-    } finally {
-      clearTimeout(overall)
-      clearTimeout(firstTokenTimer)
+  // Sends words to the app as they arrive. When continuing a broken reply the
+  // first few words are held back briefly so a repeated start can be trimmed.
+  function newSink() {
+    const prefix = carry
+    let held = ''
+    let released = !prefix
+    let out = ''
+    const release = () => {
+      released = true
+      const t = trimOverlap(prefix, held)
+      held = ''
+      if (t) { out += t; emit({ t: 'delta', text: t }) }
+    }
+    return {
+      push(piece) {
+        if (released) { out += piece; emit({ t: 'delta', text: piece }); return }
+        held += piece
+        if (held.length >= 90) release()
+      },
+      finish() { if (!released) release() },
+      get text() { return out },
     }
   }
 
-  async function tryGeminiStreamInner(model, ac, onFirstToken) {
+  // Decides what a finished or broken stream means and keeps any text already
+  // shown. Returns the same { ok, text } / { ok:false, status, detail } shape.
+  function settle(sink, finishReason, interrupted, isGemini) {
+    sink.finish()
+    const got = sink.text
+    const complete = !interrupted && (isGemini ? finishReason === 'STOP' : finishReason !== 'length')
+    if (complete && (got || carry)) return { ok: true, text: carry + got }
+    if (complete) return { ok: false, status: 502, detail: 'empty reply (finishReason: ' + finishReason + ')' }
+    if (got) {
+      if (!carry && got.length < 150) needsReset = true // too short to be worth keeping
+      else carry += got
+    }
+    if (carry.length > bestPartial.length) bestPartial = carry
+    return {
+      ok: false,
+      status: 502,
+      detail: (interrupted ? 'stream interrupted: ' + (interrupted.message || '') : 'incomplete reply, finishReason: ' + finishReason) + ', kept chars: ' + carry.length,
+    }
+  }
+
+  async function tryGeminiStream(model) {
+    // Give up on a model that stays silent for FIRST_TOKEN_MS, and on one that
+    // goes quiet for IDLE_MS part-way through. A long answer is fine as long as
+    // words keep arriving.
+    const ac = new AbortController()
+    const budget = Math.max(4000, Math.min(45000, DEADLINE - Date.now() - 1500))
+    const overall = setTimeout(() => ac.abort(), budget)
+    let timer = setTimeout(() => ac.abort(), FIRST_TOKEN_MS)
+    const touch = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), IDLE_MS) }
+    try {
+      return await tryGeminiStreamInner(model, ac, touch)
+    } finally {
+      clearTimeout(overall)
+      clearTimeout(timer)
+    }
+  }
+
+  async function tryGeminiStreamInner(model, ac, touch) {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${geminiKey}`,
       {
@@ -663,9 +736,8 @@ ${closingLine}`
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    let full = ''
-    let sentDelta = false
     let finishReason = null
+    const sink = newSink()
 
     const handleLine = (line) => {
       if (!line.startsWith('data:')) return
@@ -678,13 +750,12 @@ ${closingLine}`
       const parts = json?.candidates?.[0]?.content?.parts || []
       const piece = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
       if (piece) {
-        if (!sentDelta) onFirstToken()
-        full += piece
-        sentDelta = true
-        emit({ t: 'delta', text: piece })
+        touch()
+        sink.push(piece)
       }
     }
 
+    let interrupted = null
     try {
       while (true) {
         const { done, value } = await reader.read()
@@ -696,34 +767,26 @@ ${closingLine}`
       }
       if (buffer.trim()) handleLine(buffer.trim())
     } catch (e) {
-      if (sentDelta) needsReset = true
-      return { ok: false, status: 502, detail: 'stream interrupted: ' + (e?.message || '') }
+      interrupted = e || new Error('stream error')
     }
-
-    if (!full) return { ok: false, status: 502, detail: 'empty reply (finishReason: ' + finishReason + ')' }
-    // A reply that did not end with a normal STOP was cut off by Gemini
-    // (token limit, safety filter, dropped stream). Do not treat it as a
-    // success: keep it as a last resort and try again / the next model.
-    if (finishReason !== 'STOP') {
-      if (full.length > bestPartial.length) bestPartial = full
-      if (sentDelta) needsReset = true
-      return { ok: false, status: 502, detail: 'incomplete reply, finishReason: ' + finishReason + ', chars: ' + full.length }
-    }
-    return { ok: true, text: full }
+    return settle(sink, finishReason, interrupted, true)
   }
 
-  // Same as tryCompat, but streams words to the app as they arrive, so the
-  // backup providers feel as fast as Gemini instead of showing nothing until
-  // the whole answer is ready.
+  // Same idea for the backup providers, so they also feel fast.
   async function tryCompatStream(provider) {
     const ac = new AbortController()
-    const overall = setTimeout(() => ac.abort(), 25000)
-    const firstTimer = setTimeout(() => ac.abort(), 8000)
+    const budget = Math.max(4000, Math.min(45000, DEADLINE - Date.now() - 1500))
+    const overall = setTimeout(() => ac.abort(), budget)
+    let timer = setTimeout(() => ac.abort(), 8000)
+    const touch = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), IDLE_MS) }
     try {
+      const messages = carry
+        ? [...chatMessages, { role: 'assistant', content: carry }, { role: 'user', content: CONTINUE_NOTE }]
+        : chatMessages
       const response = await fetch(provider.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env[provider.keyEnv]}` },
-        body: JSON.stringify({ model: provider.model, messages: chatMessages, max_tokens: 4096, stream: true }),
+        body: JSON.stringify({ model: provider.model, messages, max_tokens: 4096, stream: true }),
         signal: ac.signal,
       })
       if (!response.ok) {
@@ -733,9 +796,8 @@ ${closingLine}`
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      let full = ''
-      let sentDelta = false
       let finishReason = null
+      const sink = newSink()
       const handleLine = (line) => {
         if (!line.startsWith('data:')) return
         const payload = line.slice(5).trim()
@@ -746,12 +808,11 @@ ${closingLine}`
         if (choice?.finish_reason) finishReason = choice.finish_reason
         const piece = choice?.delta?.content
         if (typeof piece === 'string' && piece) {
-          if (!sentDelta) clearTimeout(firstTimer)
-          full += piece
-          sentDelta = true
-          emit({ t: 'delta', text: piece })
+          touch()
+          sink.push(piece)
         }
       }
+      let interrupted = null
       try {
         while (true) {
           const { done, value } = await reader.read()
@@ -763,19 +824,12 @@ ${closingLine}`
         }
         if (buffer.trim()) handleLine(buffer.trim())
       } catch (e) {
-        if (sentDelta) needsReset = true
-        return { ok: false, status: 502, detail: 'stream interrupted: ' + (e?.message || '') }
+        interrupted = e || new Error('stream error')
       }
-      if (!full) return { ok: false, status: 502, detail: 'empty reply' }
-      if (finishReason === 'length') {
-        if (full.length > bestPartial.length) bestPartial = full
-        if (sentDelta) needsReset = true
-        return { ok: false, status: 502, detail: 'incomplete reply (length)' }
-      }
-      return { ok: true, text: full }
+      return settle(sink, finishReason, interrupted, false)
     } finally {
       clearTimeout(overall)
-      clearTimeout(firstTimer)
+      clearTimeout(timer)
     }
   }
 
@@ -836,8 +890,10 @@ ${closingLine}`
     let text = null
     let sawRateLimit = false
     let sawOverload = false
+    const trail = []
 
     for (const attempt of attempts) {
+      if (DEADLINE - Date.now() < 5000) { trail.push('out of time'); break }
       const maxTries = attempt.retryOnBusy ? 2 : 1
       for (let i = 0; i < maxTries && text === null; i++) {
         let result
@@ -845,6 +901,7 @@ ${closingLine}`
           if (wantStream && needsReset) {
             emit({ t: 'reset' })
             needsReset = false
+            carry = ''
           }
           result = await attempt.run()
         } catch (e) {
@@ -857,6 +914,7 @@ ${closingLine}`
           break
         }
         console.error(`Provider ${attempt.label} failed:`, result.status, result.detail)
+        trail.push(`${attempt.label.replace('gemini:gemini-', 'g')}=${result.status}`)
         if (result.status === 429) sawRateLimit = true
         if (result.status === 503) sawOverload = true
         const busy = result.status === 429 || result.status === 503
@@ -869,23 +927,26 @@ ${closingLine}`
       if (text !== null) break
     }
 
-    if (text === null && bestPartial) {
+    if (text === null && (bestPartial || carry)) {
       // Every attempt was cut off. A partial answer beats an error, but say so.
+      if (carry.length > bestPartial.length) bestPartial = carry
       text = bestPartial.trimEnd() + '\n\n_This reply was cut off. Tap Regenerate to get the full answer._'
       console.error('Serving partial reply after all attempts were incomplete, chars:', bestPartial.length)
     }
 
     if (text === null) {
       await refundQuota()
+      // Set DEBUG_ERRORS=true in Vercel to see which providers failed and why.
+      const dbg = process.env.DEBUG_ERRORS === 'true' ? ` [${trail.join(', ')}]` : ''
       if (sawRateLimit) {
-        return fail(429, 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.')
+        return fail(429, 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.' + dbg)
       }
       if (sawOverload) {
-        return fail(503, 'RADIUS is briefly overloaded. Please try again in a few seconds.')
+        return fail(503, 'RADIUS is briefly overloaded. Please try again in a few seconds.' + dbg)
       }
       // Never leak the raw upstream error message to the user. Full detail
       // is in the Vercel logs above.
-      return fail(500, "Something went wrong on RADIUS's end. Please try again.")
+      return fail(500, "Something went wrong on RADIUS's end. Please try again." + dbg)
     }
 
     // Strip the required leading type tag and use it to decide whether the
