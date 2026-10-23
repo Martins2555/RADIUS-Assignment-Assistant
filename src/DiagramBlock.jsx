@@ -7,6 +7,62 @@ import { renderGraph } from './graphs.js'
 
 export const DIAGRAM_FENCE_RE = /```(?:diagram|graph|svg)[^\n]*\n[\s\S]*?(?:```|$)/g
 
+
+// Counts { and } on a line, ignoring any inside JSON strings.
+function braceDelta(line) {
+  let d = 0
+  let inStr = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (inStr) {
+      if (ch === '\\') i++
+      else if (ch === '"') inStr = false
+    } else if (ch === '"') inStr = true
+    else if (ch === '{') d++
+    else if (ch === '}') d--
+  }
+  return d
+}
+
+// Sometimes the AI writes the drawing JSON without the ```diagram fence, which
+// would show as raw code. This finds such blocks (finished or still streaming)
+// and puts the fence back so they are drawn.
+export function normalizeDrawings(text) {
+  const src = String(text || '')
+  if (!src.includes('{')) return src
+  const lines = src.split('\n')
+  const out = []
+  let inFence = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\s*```/.test(line)) { inFence = !inFence; out.push(line); continue }
+    if (!inFence && /^\s*\{\s*("|$)/.test(line)) {
+      let depth = 0
+      let j = i
+      let closed = false
+      const buf = []
+      for (; j < lines.length; j++) {
+        buf.push(lines[j])
+        depth += braceDelta(lines[j])
+        if (depth <= 0) { closed = true; break }
+      }
+      const raw = buf.join('\n')
+      if (closed && jsonIsDrawing(raw)) {
+        out.push('```diagram', raw, '```')
+        i = j
+        continue
+      }
+      if (!closed && /"(type|curves|series|functions)"\s*:/.test(raw.slice(0, 240))) {
+        // Still streaming in: show the "Drawing..." card until it is complete.
+        out.push('```diagram', raw)
+        break
+      }
+    }
+    out.push(line)
+  }
+  return out.join('\n')
+}
+
 // For copy / share / history: replace each drawing with a short note.
 export function stripDiagrams(text, note = '[Diagram]') {
   return String(text || '').replace(DIAGRAM_FENCE_RE, note).replace(/\n{3,}/g, '\n\n')

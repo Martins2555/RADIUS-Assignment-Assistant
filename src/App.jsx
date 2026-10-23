@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import { renderToStaticMarkup } from 'react-dom/server'
 import 'katex/dist/katex.min.css'
-import { diagramComponents, stripDiagrams } from './DiagramBlock.jsx'
+import { diagramComponents, stripDiagrams, normalizeDrawings } from './DiagramBlock.jsx'
 
 // ---- PWA install prompt -----------------------------------------------------
 // The browser fires this event once, early, so it is captured at module level
@@ -1450,10 +1450,10 @@ function splitStudy(content) {
     raw = raw.replace(SRC_RE, '')
   }
   const m = raw.match(STUDY_RE)
-  if (!m) return { text: raw.trim(), deck: null, sources, kind }
+  if (!m) return { text: normalizeDrawings(raw.trim()), deck: null, sources, kind }
   let deck = null
   try { deck = JSON.parse(decodeURIComponent(m[1])) } catch (e) { deck = null }
-  return { text: raw.replace(STUDY_RE, '').trim(), deck, sources, kind }
+  return { text: normalizeDrawings(raw.replace(STUDY_RE, '').trim()), deck, sources, kind }
 }
 
 // Turns the on-screen messages into the history sent to the model. Hidden
