@@ -334,6 +334,7 @@ function getPalette(theme, accentColor) {
     accent: a1,
     accent2: a2,
     accentGrad: `linear-gradient(135deg, ${a1}, ${a2})`,
+    warn: light ? '#b45309' : '#fbbf24', // friendly amber for error messages
     accentText: light ? ac.onLight : ac.onDark,
     accentSoft: hexToRgba(a1, light ? 0.16 : 0.22),
     accentGlow: hexToRgba(a1, light ? 0.28 : 0.34),
@@ -816,7 +817,7 @@ function LockModal({ theme, accentColor, access, email, onClose, onRedeemed }) {
             style={{ width: '100%', boxSizing: 'border-box', padding: '0.7rem 0.9rem', borderRadius: '10px', border: `1px solid ${c.border}`, backgroundColor: c.bg, color: c.text, fontSize: '0.95rem', letterSpacing: '0.05em', marginBottom: '0.8rem', outline: 'none' }}
           />
         )}
-        {msg && <p style={{ fontSize: '0.82rem', color: ok ? '#22c55e' : '#f87171', margin: '0 0 0.8rem' }}>{msg}</p>}
+        {msg && <p style={{ fontSize: '0.82rem', color: ok ? '#22c55e' : 'var(--warn, #fbbf24)', margin: '0 0 0.8rem' }}>{msg}</p>}
         {!ok && (
           <button
             onClick={redeem}
@@ -1262,7 +1263,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         <p style={{ color: c.subtext, fontSize: '0.82rem', margin: '0 0 0.8rem', lineHeight: '1.5' }}>
           This permanently removes your conversations, uploads, and sign-in. This cannot be undone.
         </p>
-        {deleteError && <p style={{ color: '#ef4444', fontSize: '0.82rem', margin: '0 0 0.6rem' }}>{deleteError}</p>}
+        {deleteError && <p style={{ color: 'var(--warn, #fbbf24)', fontSize: '0.82rem', margin: '0 0 0.6rem' }}>{deleteError}</p>}
         <button
           onClick={handleDeleteClick}
           disabled={deleting}
@@ -1735,7 +1736,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, defaul
         <div style={{ lineHeight: '1.6' }} className="radius-markdown">
           <ReactMarkdown
             remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[[rehypeKatex, { errorColor: c.warn }]]}
             components={{
               ...diagramComponents(c),
               blockquote: ({ node, ...rest }) => (
@@ -2253,7 +2254,7 @@ function MarkdownBlock({ text, c }) {
     <div style={{ lineHeight: 1.6, fontSize: '0.92rem' }} className="radius-markdown">
       <ReactMarkdown
         remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, { errorColor: c.warn }]]}
         components={{
           ...diagramComponents(c),
           table: ({ node, ...rest }) => (
@@ -2458,7 +2459,7 @@ function QuizOverlay({ quiz, c, onClose, onSave, onRetry }) {
         )}
         {quiz.status === 'error' && (
           <div style={{ textAlign: 'center', marginTop: '3rem' }}>
-            <p style={{ color: '#ef4444' }}>{quiz.error}</p>
+            <p style={{ color: 'var(--warn, #fbbf24)' }}>{quiz.error}</p>
             <button type="button" onClick={onRetry} style={{ ...btnPrimary(c), marginTop: '0.8rem' }}>Try again</button>
           </div>
         )}
@@ -2513,7 +2514,7 @@ function ProjectHome({ c, projects, activeProject, files, uploading, projectErro
           />
           <button type="submit" disabled={!name.trim()} style={{ ...btnPrimary(c), opacity: name.trim() ? 1 : 0.45 }}>Create</button>
         </form>
-        {projectError && <p style={{ color: '#ef4444', fontSize: '0.82rem', marginTop: '0.6rem' }}>{projectError}</p>}
+        {projectError && <p style={{ color: 'var(--warn, #fbbf24)', fontSize: '0.82rem', marginTop: '0.6rem' }}>{projectError}</p>}
         <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
           {projects.length === 0 && <p style={{ color: c.subtext, fontSize: '0.82rem', textAlign: 'center' }}>No projects yet. Create your first one above.</p>}
           {projects.map((p) => (
@@ -2559,7 +2560,7 @@ function ProjectHome({ c, projects, activeProject, files, uploading, projectErro
           </button>
         </div>
         <p style={{ margin: '0.35rem 0 0', fontSize: '0.76rem', color: c.subtext }}>PDFs, photos of notes, or text files. Up to 12 MB each.</p>
-        {projectError && <p style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>{projectError}</p>}
+        {projectError && <p style={{ color: 'var(--warn, #fbbf24)', fontSize: '0.8rem', marginTop: '0.5rem' }}>{projectError}</p>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginTop: '0.7rem' }}>
           {files.length === 0 && <p style={{ margin: 0, fontSize: '0.82rem', color: c.subtext }}>Nothing here yet. Add your notes to begin.</p>}
           {files.map((f) => {
@@ -2573,7 +2574,7 @@ function ProjectHome({ c, projects, activeProject, files, uploading, projectErro
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: 0, fontSize: '0.84rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</p>
-                  <p style={{ margin: '1px 0 0', fontSize: '0.72rem', color: failed ? '#ef4444' : working ? c.subtext : '#22c55e' }}>
+                  <p style={{ margin: '1px 0 0', fontSize: '0.72rem', color: failed ? 'var(--warn, #fbbf24)' : working ? c.subtext : '#22c55e' }}>
                     {failed ? (f.error || 'Could not be read') : working ? 'Reading...' : `Ready${f.char_count ? ` · ${Math.max(1, Math.round(f.char_count / 1000))}k characters` : ''}`}
                   </p>
                 </div>
@@ -2673,7 +2674,7 @@ function LibraryScreen({ theme, accentColor, projects, onBack, onToast }) {
               <button key={v} type="button" onClick={() => setFilter(v)} style={{ ...styles.modeBtn, flexShrink: 0, whiteSpace: 'nowrap', backgroundColor: filter === v ? c.accent : 'transparent', backgroundImage: filter === v ? c.accentGrad : 'none', color: filter === v ? c.accentText : c.subtext, borderColor: c.border }}>{l}</button>
             ))}
           </div>
-          {loadError && <p style={{ color: '#ef4444', fontSize: '0.85rem' }}>{loadError}</p>}
+          {loadError && <p style={{ color: 'var(--warn, #fbbf24)', fontSize: '0.85rem' }}>{loadError}</p>}
           {items === null && !loadError && <p style={{ color: c.subtext, fontSize: '0.85rem' }}>Loading...</p>}
           {items !== null && shown.length === 0 && (
             <p style={{ color: c.subtext, fontSize: '0.88rem', textAlign: 'center', marginTop: '2rem' }}>
@@ -2834,7 +2835,7 @@ function NotificationsCard({ c, session }) {
           <button type="button" disabled={busy || permission === 'denied'} onClick={enable} style={{ ...btnPrimary(c), marginTop: '0.8rem', opacity: busy || permission === 'denied' ? 0.5 : 1 }}>
             {busy ? 'Turning on...' : 'Turn on notifications'}
           </button>
-          {permission === 'denied' && <p style={{ margin: '0.5rem 0 0', fontSize: '0.78rem', color: '#ef4444' }}>Blocked in your browser settings. Allow notifications for this site, then come back.</p>}
+          {permission === 'denied' && <p style={{ margin: '0.5rem 0 0', fontSize: '0.78rem', color: 'var(--warn, #fbbf24)' }}>Blocked in your browser settings. Allow notifications for this site, then come back.</p>}
         </>
       ) : (
         <>
@@ -2847,7 +2848,7 @@ function NotificationsCard({ c, session }) {
           </div>
         </>
       )}
-      {note && <p style={{ margin: '0.6rem 0 0', fontSize: '0.8rem', color: '#ef4444' }}>{note}</p>}
+      {note && <p style={{ margin: '0.6rem 0 0', fontSize: '0.8rem', color: 'var(--warn, #fbbf24)' }}>{note}</p>}
     </SettingsCard>
   )
 }
@@ -2881,6 +2882,7 @@ function Dashboard({ session }) {
     const root = document.documentElement.style
     root.setProperty('--bg', pal.bg)
     root.setProperty('--accent', pal.accent)
+    root.setProperty('--warn', pal.warn)
     root.setProperty('--accent2', pal.accent2)
     root.setProperty('--accent-soft', pal.accentSoft)
     root.setProperty('--bg-glow', pal.bgGlow)
@@ -3051,7 +3053,7 @@ function Dashboard({ session }) {
   function handleExportPdf(text) {
     try {
       const html = renderToStaticMarkup(
-        <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]} rehypePlugins={[rehypeKatex]} components={diagramComponents(getPalette('light', accentColor), true)}>{text || ''}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]} rehypePlugins={[[rehypeKatex, { errorColor: '#b45309' }]]} components={diagramComponents(getPalette('light', accentColor), true)}>{text || ''}</ReactMarkdown>
       )
       const pageCss = Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).map((n) => n.outerHTML).join('\n')
       const iframe = document.createElement('iframe')
@@ -4473,7 +4475,7 @@ function Dashboard({ session }) {
             {statusNote || 'Thinking...'}
           </div>
         )}
-        {error && <p style={{ color: '#ef4444', padding: '0.4rem 0', textAlign: 'center' }}>{error}</p>}
+        {error && <p style={{ color: 'var(--warn, #fbbf24)', padding: '0.4rem 0', textAlign: 'center' }}>{error}</p>}
         {retryPayload && !loading && (
           <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '0.6rem' }}>
             <button type="button" onClick={handleRetry} style={{ ...styles.chipBtn, borderColor: c.accent, backgroundColor: c.accent, backgroundImage: c.accentGrad, color: c.accentText, fontWeight: 'bold' }}>
@@ -4758,7 +4760,7 @@ function ResetPasswordScreen({ onDone }) {
         <PasswordMeter password={newPassword} />
         <PasswordInput placeholder="Confirm new password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
         {confirmPassword && (
-          <p style={{ margin: '-0.2rem 0 0', textAlign: 'left', fontSize: '0.78rem', fontWeight: 600, color: confirmPassword === newPassword ? '#22c55e' : '#ef4444' }}>
+          <p style={{ margin: '-0.2rem 0 0', textAlign: 'left', fontSize: '0.78rem', fontWeight: 600, color: confirmPassword === newPassword ? '#22c55e' : 'var(--warn, #fbbf24)' }}>
             {confirmPassword === newPassword ? 'Passwords match' : 'Passwords do not match'}
           </p>
         )}

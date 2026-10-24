@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { renderDiagram, prepareFreeSvg, DIAGRAM_TYPES } from './diagrams.js'
+import { renderDiagram, prepareFreeSvg, inferType, DIAGRAM_TYPES } from './diagrams.js'
 import { renderGraph } from './graphs.js'
 
 // Fenced code blocks in a reply (```diagram, ```graph, ```svg) are drawn by
@@ -35,6 +35,20 @@ export function normalizeDrawings(text) {
   let inFence = false
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
+    const fenceOpen = !inFence && /^\s*```\s*([\w-]*)\s*$/.exec(line)
+    if (fenceOpen && PLAIN_LANGS.has(fenceOpen[1].toLowerCase())) {
+      let j = i + 1
+      const body = []
+      while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) { body.push(lines[j]); j++ }
+      const closed = j < lines.length
+      const raw = body.join('\n').trim()
+      if (raw.startsWith('{') && (closed ? jsonIsDrawing(raw) : DRAWING_START.test(raw.slice(0, 300)))) {
+        out.push('```diagram', ...body)
+        if (closed) out.push(lines[j])
+        i = closed ? j : lines.length
+        continue
+      }
+    }
     if (/^\s*```/.test(line)) { inFence = !inFence; out.push(line); continue }
     if (!inFence && /^\s*\{\s*("|$)/.test(line)) {
       let depth = 0
@@ -301,7 +315,7 @@ export function DiagramBlock({ kind, source, c, print }) {
     }
     try {
       const spec = JSON.parse(source.replace(/^\uFEFF/, ''))
-      const isGraph = kind === 'graph' || (spec && (spec.curves || spec.series || spec.functions || spec.points) && !spec.type)
+      const isGraph = kind === 'graph' || inferType(spec) === 'graph' || (spec && !spec.type && spec.points && !spec.parts)
       if (isGraph) return { graph: spec }
       return { diagram: renderDiagram(spec, pal) }
     } catch (e) {
@@ -318,15 +332,20 @@ export function DiagramBlock({ kind, source, c, print }) {
   return <DiagramView out={out} c={c} name={`radius-${kind === 'svg' ? 'drawing' : 'diagram'}`} print={print} />
 }
 
-// True when a ```json block is really a diagram or graph spec.
+// True when a block of JSON is really a diagram or graph spec.
 export function jsonIsDrawing(source) {
   try {
     const o = JSON.parse(source)
-    return !!o && typeof o === 'object' && (DIAGRAM_TYPES.includes(String(o.type || '').toLowerCase()) || (!o.type && (o.curves || o.series || o.functions)))
+    const t = inferType(o)
+    return t === 'graph' || DIAGRAM_TYPES.includes(t)
   } catch (e) {
     return false
   }
 }
+
+// Languages the AI sometimes puts on a drawing block instead of "diagram".
+const PLAIN_LANGS = new Set(['', 'json', 'jsonc', 'json5', 'javascript', 'js', 'text', 'plaintext', 'txt'])
+const DRAWING_START = /"(type|layout|parts|source|supports|loads|forces|curves|series|functions)"\s*:/
 
 // react-markdown component overrides. Merge into the existing `components`.
 export function diagramComponents(c, print = false) {
@@ -334,20 +353,26 @@ export function diagramComponents(c, print = false) {
     const m = /language-([\w-]+)/.exec(cls || '')
     return m ? m[1].toLowerCase() : ''
   }
-  const isDrawing = (lang, src) => lang === 'diagram' || lang === 'graph' || lang === 'svg' || (lang === 'json' && jsonIsDrawing(src))
+  const textOf = (ch) => (Array.isArray(ch) ? ch.join('') : String(ch ?? ''))
+  // Returns 'diagram' | 'graph' | 'svg' | 'json' when this code block is a drawing.
+  const drawingKind = (lang, raw) => {
+    const src = raw.trim()
+    if (lang === 'diagram' || lang === 'graph' || lang === 'svg') return lang
+    if (PLAIN_LANGS.has(lang) && src.startsWith('{') && src.includes('\n') && (jsonIsDrawing(src) || (!src.endsWith('}') && DRAWING_START.test(src.slice(0, 300))))) return 'json'
+    return null
+  }
   return {
     pre: ({ node, children, ...rest }) => {
       const child = Array.isArray(children) ? children[0] : children
       const props = child && child.props ? child.props : {}
-      const lang = langOf(props.className)
-      const src = typeof props.children === 'string' ? props.children : Array.isArray(props.children) ? props.children.join('') : ''
-      if (isDrawing(lang, src.trim())) return <>{children}</>
+      if (drawingKind(langOf(props.className), typeof props.children === 'string' ? props.children : textOf(props.children))) return <>{children}</>
       return <pre {...rest} style={{ overflowX: 'auto', maxWidth: '100%' }}>{children}</pre>
     },
     code: ({ node, className, children, ...rest }) => {
       const lang = langOf(className)
-      const src = (Array.isArray(children) ? children.join('') : String(children ?? '')).replace(/\n$/, '')
-      if (lang && isDrawing(lang, src.trim())) return <DiagramBlock kind={lang === 'json' ? 'json' : lang} source={src} c={c} print={print} />
+      const src = textOf(children).replace(/\n$/, '')
+      const kind = drawingKind(lang, src)
+      if (kind) return <DiagramBlock kind={kind} source={src} c={c} print={print} />
       return <code className={className} {...rest}>{children}</code>
     },
   }

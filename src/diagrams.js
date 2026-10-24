@@ -614,9 +614,23 @@ function lens(spec, p) {
 // ---------------------------------------------------------------------------
 // Entry points
 // ---------------------------------------------------------------------------
+// The AI sometimes leaves out "type". Work it out from the other keys.
+export function inferType(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return ''
+  const t = String(o.type || '').toLowerCase()
+  if (t) return t
+  if (o.curves || o.series || o.functions) return 'graph'
+  if (o.parts || o.components || o.source) return 'circuit'
+  if (o.supports || o.loads) return 'beam'
+  if (Array.isArray(o.forces)) return 'fbd'
+  if ('f' in o && 'u' in o) return 'lens'
+  if ('h' in o && 'k' in o && 'l' in o) return 'miller_plane'
+  return ''
+}
+
 export function renderDiagram(spec, p) {
   if (!spec || typeof spec !== 'object') throw new Error('Empty diagram.')
-  switch (String(spec.type || '').toLowerCase()) {
+  switch (inferType(spec)) {
     case 'miller_plane':
     case 'miller':
       return miller(spec, p)
