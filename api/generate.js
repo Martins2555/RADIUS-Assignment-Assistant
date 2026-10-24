@@ -566,7 +566,7 @@ ${closingLine}`
   let carry = ''
   const DEADLINE = Date.now() + 52000 // Vercel stops the function at 60s
   const CONTINUE_NOTE =
-    'Continue your previous reply exactly where it stopped. Do not repeat anything already written, do not start over, and finish any equation, table or code block that was left open.'
+    'Continue your previous reply exactly where it stopped, in the middle of the sentence if that is where it stopped. Do not repeat anything already written, do not start over, do not add a heading such as "(continued)", and do NOT write the [TYPE:...] tag again (it was already written at the very start). Finish any equation, table or code block that was left open. Write every equation between double dollar signs ($$...$$) or single dollar signs ($...$); never use \\[ \\] or \\( \\) delimiters.'
   const IDLE_MS = Number(process.env.IDLE_MS) || 15000
 
   // Some free models answer with nonsense (for example a safety-classifier
@@ -696,7 +696,8 @@ ${closingLine}`
     let out = ''
     const release = () => {
       released = true
-      const t = trimOverlap(prefix, held)
+      // a continuing model sometimes writes the type tag again: drop it
+      const t = trimOverlap(prefix, prefix ? held.replace(/^\s*\[TYPE:[A-Z]+\]\s*/i, '') : held)
       held = ''
       if (t) { out += t; emit({ t: 'delta', text: t }) }
     }
@@ -995,6 +996,9 @@ ${closingLine}`
       responseType = tagMatch[1].toLowerCase()
       text = text.slice(tagMatch[0].length)
     }
+    // Any further tag in the middle came from a backup model that continued a
+    // broken reply. It is never meant to be shown.
+    text = text.replace(/[ \t]*\[TYPE:(?:ASSIGNMENT|GENERAL)\][ \t]*/gi, '')
 
     // With DEBUG_ERRORS=true in Vercel, each reply ends with the provider that wrote it.
     if (process.env.DEBUG_ERRORS === 'true' && servedBy) text += `\n\n_[served by ${servedBy}]_`
