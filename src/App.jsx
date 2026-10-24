@@ -1276,6 +1276,9 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
       <button onClick={onLogout} style={{ ...styles.logoutBtn, borderColor: c.border, color: '#ef4444', width: '100%', boxSizing: 'border-box' }}>
         Log Out
       </button>
+      <p style={{ color: c.subtext, fontSize: '0.72rem', textAlign: 'center', margin: '1rem 0 0', opacity: 0.8 }}>
+        RADIUS build 25 Oct 2026 (diagrams v3)
+      </p>
     </div>
   )
 }
