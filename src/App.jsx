@@ -26,9 +26,30 @@ if (typeof window !== 'undefined') {
 
 // While a reply is streaming in, hide the hidden type tag at the start and the
 // Study Pack JSON block at the end so the student never sees them flash by.
+//
+// fixReplyText also repairs two things a backup model can leave in the middle
+// of a reply it was asked to continue: a repeated [TYPE:...] tag, and maths
+// written as \[ ... \] or \( ... \) (markdown eats those backslashes, so the
+// student saw bare brackets and "\text{kN}" instead of a formula).
+export function fixReplyText(raw) {
+  const parts = String(raw || '').split(/(```[\s\S]*?(?:```|$))/g)
+  return parts
+    .map((seg, i) => {
+      if (i % 2 === 1) return seg // code block: leave untouched
+      return seg
+        .replace(/\s*\[TYPE:(?:ASSIGNMENT|GENERAL)\]\s*/gi, '\n')
+        .replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => `\n$$${m.trim()}$$\n`)
+        .replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => `$${m.trim()}$`)
+    })
+    .join('')
+}
+
 function cleanStreamText(raw) {
   let t = raw || ''
   t = t.replace(/^\s*\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/i, '')
+  t = fixReplyText(t)
+  // a tag still being typed at the very end, e.g. "[TYP"
+  t = t.replace(/\[(?:T(?:Y(?:P(?:E(?::[A-Z]*)?)?)?)?)?$/, '')
   if (/^\s*\[[A-Za-z:]*$/.test(t)) return ''
   const idx = t.indexOf('<study_data>')
   if (idx !== -1) t = t.slice(0, idx)
@@ -1824,7 +1845,7 @@ function MessageBubble({ id, role, content, theme, accentColor, feedback, defaul
               p: (props) => <p {...props} style={{ margin: '0 0 0.5rem 0' }} />,
             }}
           >
-            {displayText}
+            {isUser ? displayText : fixReplyText(displayText)}
           </ReactMarkdown>
         </div>
       </div>
@@ -2271,7 +2292,7 @@ function MarkdownBlock({ text, c }) {
           p: (props) => <p {...props} style={{ margin: '0 0 0.5rem 0' }} />,
         }}
       >
-        {text || ''}
+        {fixReplyText(text || '')}
       </ReactMarkdown>
     </div>
   )
