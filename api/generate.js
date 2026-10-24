@@ -50,6 +50,20 @@ DIAGRAM block (language "diagram"), pick the "type" that fits:
 
 ${GRAPH_SPEC_HELP}`
 
+// A reply that breaks off can stop in the middle of a formula or code block.
+// Close it so the note after it is not swallowed (and painted as a maths error).
+function closeOpenSyntax(t) {
+  let out = String(t || '')
+  if ((out.match(/^\s*```/gm) || []).length % 2 === 1) out += '\n```'
+  const noCode = out.replace(/```[\s\S]*?```/g, '')
+  if ((noCode.match(/\$\$/g) || []).length % 2 === 1) out += '\n$$'
+  else {
+    const singles = noCode.replace(/\$\$/g, '').replace(/\\\$/g, '')
+    if ((singles.match(/\$/g) || []).length % 2 === 1) out += '$'
+  }
+  return out
+}
+
 function toolInstruction(tool, todayText) {
   switch (tool) {
     case 'notes':
@@ -555,6 +569,15 @@ ${closingLine}`
     'Continue your previous reply exactly where it stopped. Do not repeat anything already written, do not start over, and finish any equation, table or code block that was left open.'
   const IDLE_MS = Number(process.env.IDLE_MS) || 15000
 
+  // Some free models answer with nonsense (for example a safety-classifier
+  // model reached through OpenRouter's auto-picker replying "User Safety: safe").
+  // Such replies are thrown away and the next provider is tried instead.
+  function isJunk(t) {
+    const s = String(t || '').replace(/\[TYPE:[A-Z]+\]/gi, '').trim()
+    return s.length < 8 || /^(user|response|assistant|content|prompt)\s+safety\b/i.test(s) || /^(safe|unsafe)[\s.:]*$/i.test(s)
+  }
+  let servedBy = ''
+
   // The new provider may repeat the last few words. Drop the repeated start.
   function trimOverlap(prefix, t) {
     const max = Math.min(80, t.length, prefix.length)
@@ -687,6 +710,10 @@ ${closingLine}`
     sink.finish()
     const got = sink.text
     const complete = !interrupted && (isGemini ? finishReason === 'STOP' : finishReason !== 'length')
+    if (complete && !carry && isJunk(got)) {
+      if (got) emit({ t: 'reset' }) // clear the nonsense already streamed to the app
+      return { ok: false, status: 502, detail: 'junk reply: ' + JSON.stringify(got.slice(0, 40)) }
+    }
     if (complete && (got || carry)) return { ok: true, text: carry + got }
     if (complete) return { ok: false, status: 502, detail: 'empty reply (finishReason: ' + finishReason + ')' }
     if (got) {
@@ -910,6 +937,7 @@ ${closingLine}`
         }
         if (result.ok) {
           text = result.text
+          servedBy = attempt.label
           console.log(`Reply served by ${attempt.label}`)
           break
         }
@@ -930,7 +958,7 @@ ${closingLine}`
     if (text === null && (bestPartial || carry)) {
       // Every attempt was cut off. A partial answer beats an error, but say so.
       if (carry.length > bestPartial.length) bestPartial = carry
-      text = bestPartial.trimEnd() + '\n\n_This reply was cut off. Tap Regenerate to get the full answer._'
+      text = closeOpenSyntax(bestPartial.trimEnd()) + '\n\n_This reply was cut off. Tap Regenerate to get the full answer._'
       console.error('Serving partial reply after all attempts were incomplete, chars:', bestPartial.length)
     }
 
@@ -959,6 +987,9 @@ ${closingLine}`
       responseType = tagMatch[1].toLowerCase()
       text = text.slice(tagMatch[0].length)
     }
+
+    // With DEBUG_ERRORS=true in Vercel, each reply ends with the provider that wrote it.
+    if (process.env.DEBUG_ERRORS === 'true' && servedBy) text += `\n\n_[served by ${servedBy}]_`
 
     // Study Pack: pull the structured flashcards/quiz out of the reply and
     // attach them as a hidden marker the app turns into interactive cards.
