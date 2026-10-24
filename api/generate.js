@@ -18,7 +18,7 @@ const supabaseAuth = createClient(
 // changed from Vercel env vars without touching code.
 // ---------------------------------------------------------------------------
 const OPENAI_COMPAT_PROVIDERS = [
-  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', keyEnv: 'GROQ_API_KEY', model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile' },
+  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', keyEnv: 'GROQ_API_KEY', model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b' },
   { name: 'mistral', url: 'https://api.mistral.ai/v1/chat/completions', keyEnv: 'MISTRAL_API_KEY', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' },
   { name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', keyEnv: 'CEREBRAS_API_KEY', model: process.env.CEREBRAS_MODEL || 'llama-3.3-70b' },
   { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', keyEnv: 'OPENROUTER_API_KEY', model: process.env.OPENROUTER_MODEL || 'openrouter/free' },
@@ -590,10 +590,14 @@ ${closingLine}`
   // ---- Build the list of providers to try, in order ----
   const hasFiles = currentParts.some((p) => p.inline_data)
   const geminiKey = process.env.GEMINI_API_KEY
-  // Each Gemini model has its own separate quota, so gemini-3.8 is an extra
-  // safety net when both Flash models are rate limited or busy. (The 2.5
-  // models are closed to new users, so they are not used.)
-  const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.8']
+  // Each Gemini model has its own separate quota, so the older Flash models are
+  // safety nets when the newest one is rate limited or busy. The 3.8 model ID is
+  // "gemini-3.8-flash" (plain "gemini-3.8" does not exist and returns 404).
+  // Set GEMINI_MODELS_ORDER in Vercel (comma separated) to change the order.
+  const GEMINI_MODELS = (process.env.GEMINI_MODELS_ORDER || 'gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean)
 
   const geminiBodyGemini3 = JSON.stringify({
     system_instruction: { parts: [{ text: systemInstruction }] },
@@ -679,6 +683,9 @@ ${closingLine}`
 
   let bestPartial = ''
   const FIRST_TOKEN_MS = Number(process.env.FIRST_TOKEN_MS) || 9000
+
+  // Reasoning models on Groq accept an effort setting; keep it low so replies stay fast.
+  const extraBody = (provider) => (provider.name === 'groq' && /gpt-oss/.test(provider.model) ? { reasoning_effort: 'low' } : {})
 
   // Sends words to the app as they arrive. When continuing a broken reply the
   // first few words are held back briefly so a repeated start can be trimmed.
@@ -813,7 +820,7 @@ ${closingLine}`
       const response = await fetch(provider.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env[provider.keyEnv]}` },
-        body: JSON.stringify({ model: provider.model, messages, max_tokens: 4096, stream: true }),
+        body: JSON.stringify({ model: provider.model, messages, max_tokens: 4096, stream: true, ...extraBody(provider) }),
         signal: ac.signal,
       })
       if (!response.ok) {
@@ -871,6 +878,7 @@ ${closingLine}`
         model: provider.model,
         messages: chatMessages,
         max_tokens: 4096,
+        ...extraBody(provider),
       }),
       signal: AbortSignal.timeout(20000),
     })
@@ -942,7 +950,7 @@ ${closingLine}`
           break
         }
         console.error(`Provider ${attempt.label} failed:`, result.status, result.detail)
-        trail.push(`${attempt.label.replace('gemini:gemini-', 'g')}=${result.status}`)
+        trail.push(`${attempt.label.replace('gemini:gemini-', 'g')}=${result.status}${result.status === 502 && result.detail ? ' ' + String(result.detail).slice(0, 30) : ''}`)
         if (result.status === 429) sawRateLimit = true
         if (result.status === 503) sawOverload = true
         const busy = result.status === 429 || result.status === 503
