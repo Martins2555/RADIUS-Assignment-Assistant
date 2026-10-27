@@ -566,7 +566,7 @@ ${closingLine}`
   let carry = ''
   const DEADLINE = Date.now() + 52000 // Vercel stops the function at 60s
   const CONTINUE_NOTE =
-    'Continue your previous reply exactly where it stopped, in the middle of the sentence if that is where it stopped. Do not repeat anything already written, do not start over, do not add a heading such as "(continued)", and do NOT write the [TYPE:...] tag again (it was already written at the very start). Finish any equation, table or code block that was left open. Write every equation between double dollar signs ($$...$$) or single dollar signs ($...$); never use \\[ \\] or \\( \\) delimiters.'
+    'Continue your previous reply exactly where it stopped, in the same format. Do not repeat anything already written, do not start over, do not write the [TYPE:...] tag again, and do not add a heading such as "continued". Write all maths only with $...$ and $$...$$. Finish any equation, table or code block that was left open.'
   const IDLE_MS = Number(process.env.IDLE_MS) || 15000
 
   // Some free models answer with nonsense (for example a safety-classifier
@@ -687,6 +687,33 @@ ${closingLine}`
   // Reasoning models on Groq accept an effort setting; keep it low so replies stay fast.
   const extraBody = (provider) => (provider.name === 'groq' && /gpt-oss/.test(provider.model) ? { reasoning_effort: 'low' } : {})
 
+  // Before a broken reply is continued, cut it back so it does not end inside a
+  // formula or code block (the continuation would then start half-way through one).
+  function prepareCarry() {
+    if (!carry) return
+    let cut = carry
+    const fenceCount = (cut.match(/^\s*```/gm) || []).length
+    if (fenceCount % 2 === 1) cut = cut.slice(0, cut.lastIndexOf('```')).trimEnd()
+    if ((cut.replace(/```[\s\S]*?```/g, '').match(/\$\$/g) || []).length % 2 === 1) cut = cut.slice(0, cut.lastIndexOf('$$')).trimEnd()
+    else {
+      let idx = -1
+      for (let i = cut.length - 1; i >= 0; i--) {
+        if (cut[i] === '$' && cut[i - 1] !== '$' && cut[i + 1] !== '$' && cut[i - 1] !== '\\') { idx = i; break }
+      }
+      const singles = (cut.replace(/\$\$/g, '').replace(/\\\$/g, '').match(/\$/g) || []).length
+      if (singles % 2 === 1 && idx >= 0) cut = cut.slice(0, idx).trimEnd()
+    }
+    if (cut === carry) return
+    if (cut.length < 150) {
+      carry = '' // too little left to be worth keeping
+      emit({ t: 'reset' })
+      return
+    }
+    carry = cut
+    emit({ t: 'reset' })
+    emit({ t: 'delta', text: carry })
+  }
+
   // Sends words to the app as they arrive. When continuing a broken reply the
   // first few words are held back briefly so a repeated start can be trimmed.
   function newSink() {
@@ -696,8 +723,7 @@ ${closingLine}`
     let out = ''
     const release = () => {
       released = true
-      // a continuing model sometimes writes the type tag again: drop it
-      const t = trimOverlap(prefix, prefix ? held.replace(/^\s*\[TYPE:[A-Z]+\]\s*/i, '') : held)
+      const t = trimOverlap(prefix, held.replace(/\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/gi, '').replace(/^\s*(?:#+\s*|\*\*)?[^\n]{0,60}\(continued\)\**[ \t]*\n/i, ''))
       held = ''
       if (t) { out += t; emit({ t: 'delta', text: t }) }
     }
@@ -737,6 +763,7 @@ ${closingLine}`
   }
 
   async function tryGeminiStream(model) {
+    prepareCarry()
     // Give up on a model that stays silent for FIRST_TOKEN_MS, and on one that
     // goes quiet for IDLE_MS part-way through. A long answer is fine as long as
     // words keep arriving.
@@ -809,6 +836,7 @@ ${closingLine}`
 
   // Same idea for the backup providers, so they also feel fast.
   async function tryCompatStream(provider) {
+    prepareCarry()
     const ac = new AbortController()
     const budget = Math.max(4000, Math.min(45000, DEADLINE - Date.now() - 1500))
     const overall = setTimeout(() => ac.abort(), budget)
@@ -996,9 +1024,8 @@ ${closingLine}`
       responseType = tagMatch[1].toLowerCase()
       text = text.slice(tagMatch[0].length)
     }
-    // Any further tag in the middle came from a backup model that continued a
-    // broken reply. It is never meant to be shown.
-    text = text.replace(/[ \t]*\[TYPE:(?:ASSIGNMENT|GENERAL)\][ \t]*/gi, '')
+
+    text = text.replace(/\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/gi, '')
 
     // With DEBUG_ERRORS=true in Vercel, each reply ends with the provider that wrote it.
     if (process.env.DEBUG_ERRORS === 'true' && servedBy) text += `\n\n_[served by ${servedBy}]_`
