@@ -1278,7 +1278,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         Log Out
       </button>
       <p style={{ color: c.subtext, fontSize: '0.72rem', textAlign: 'center', margin: '1rem 0 0', opacity: 0.8 }}>
-        RADIUS build 28 Oct 2026 (v6 drawings always draw)
+        RADIUS build 28 Oct 2026 (v6 drawings always draw, login refresh)
       </p>
     </div>
   )
@@ -3559,11 +3559,11 @@ function Dashboard({ session }) {
     }
 
     try {
-      const response = await fetch('/api/generate', {
+      const sendGenerate = (accessToken) => fetch('/api/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           subject,
@@ -3583,6 +3583,21 @@ function Dashboard({ session }) {
         }),
         signal: controller.signal,
       })
+      // Use the freshest login token. A phone that slept can hold an expired
+      // one, which showed "Invalid or expired session". getSession renews it.
+      let accessToken = session.access_token
+      try {
+        const { data: cur } = await supabase.auth.getSession()
+        if (cur && cur.session && cur.session.access_token) accessToken = cur.session.access_token
+      } catch (e) { /* fall back to the token we have */ }
+      let response = await sendGenerate(accessToken)
+      if (response.status === 401) {
+        // Expired anyway: refresh once and try again before showing an error.
+        try {
+          const { data: ref } = await supabase.auth.refreshSession()
+          if (ref && ref.session && ref.session.access_token) response = await sendGenerate(ref.session.access_token)
+        } catch (e) { /* the error below explains it */ }
+      }
 
       const contentType = response.headers.get('content-type') || ''
       if (!response.ok || !contentType.includes('ndjson')) {
