@@ -1278,7 +1278,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         Log Out
       </button>
       <p style={{ color: c.subtext, fontSize: '0.72rem', textAlign: 'center', margin: '1rem 0 0', opacity: 0.8 }}>
-        RADIUS build 28 Oct 2026 (v7 login fix)
+        RADIUS build 28 Oct 2026 (v8 swipe fix)
       </p>
     </div>
   )
@@ -1381,6 +1381,13 @@ function useSwipeReply(onReply) {
 
   const onTouchStart = (e) => {
     if (e.target && e.target.closest && e.target.closest('[data-noswipe]')) {
+      startRef.current = null
+      return
+    }
+    // A wide equation or code block that scrolls sideways: the finger is
+    // scrolling it, not replying. Equations that fit still swipe-to-reply.
+    const wide = e.target && e.target.closest ? e.target.closest('.katex-display, pre') : null
+    if (wide && wide.scrollWidth > wide.clientWidth + 1) {
       startRef.current = null
       return
     }
