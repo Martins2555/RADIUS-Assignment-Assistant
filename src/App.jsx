@@ -1278,7 +1278,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         Log Out
       </button>
       <p style={{ color: c.subtext, fontSize: '0.72rem', textAlign: 'center', margin: '1rem 0 0', opacity: 0.8 }}>
-        RADIUS build 28 Oct 2026 (v6 drawings always draw, login refresh)
+        RADIUS build 28 Oct 2026 (v7 login fix)
       </p>
     </div>
   )
@@ -3597,6 +3597,12 @@ function Dashboard({ session }) {
           const { data: ref } = await supabase.auth.refreshSession()
           if (ref && ref.session && ref.session.access_token) response = await sendGenerate(ref.session.access_token)
         } catch (e) { /* the error below explains it */ }
+        if (response.status === 401) {
+          // The login really is finished. Send the student to the login page
+          // instead of leaving them stuck on an error.
+          supabase.auth.signOut().catch(() => {})
+          throw new Error('Your login ended. Please log in again.')
+        }
       }
 
       const contentType = response.headers.get('content-type') || ''
