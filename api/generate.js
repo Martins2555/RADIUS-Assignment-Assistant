@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { sendPushToUser } from './_push.js'
+import { canonicalizeDrawings } from '../src/drawingExtract.js'
 
 // Uses the anon/publishable key — same key already used successfully by the
 // frontend for login — just to verify the incoming JWT belongs to a real,
@@ -38,7 +39,7 @@ const VALID_ACTIONS = ['regen', 'explain', 'hint', 'quiz', 'summary', 'solution'
 const GRAPH_SPEC_HELP = `GRAPH block (language "graph"): {"title":"y = x^2 - 4x + 3","xlabel":"x","ylabel":"y","xmin":-2,"xmax":6,"ymin":-2,"ymax":8,"curves":[{"expr":"x^2 - 4*x + 3","label":"y = x^2 - 4x + 3"}],"series":[{"name":"Data","points":[[0,1],[1,3]],"line":true}],"points":[{"x":1,"y":2,"label":"A"}],"vlines":[{"x":2,"label":"x = 2"}],"hlines":[{"y":1,"label":"y = 1"}]}
 Graph rules: every field except "curves", "series" or "points" is optional. In "expr" use only x, numbers, + - * / ^, brackets, the functions sin cos tan asin acos atan sinh cosh tanh sqrt abs ln log exp, and the constants pi and e (angles in radians). Write each equation solved for y. For a circle or other curve that cannot be solved for y, use a parametric curve: {"param":{"x":"3*cos(t)","y":"3*sin(t)","t":[0,6.2832]},"label":"x^2 + y^2 = 9"}. Always set xmin and xmax (and ymin and ymax when you know sensible values) so the interesting part of the graph is visible. Use "dashed":true on a curve for a second or comparison curve. Intercepts and turning points are marked automatically, so do not add them as points.`
 
-const DIAGRAM_RULES = `DIAGRAMS AND GRAPHS: The app draws accurate diagrams and graphs from a JSON spec. When the student asks to show, draw, sketch, illustrate, plot or represent something, or when a diagram would clearly help (crystal planes and unit cells, forces, beams, circuits, lenses, graphs of functions), put exactly ONE fenced code block in your reply. Use the language "diagram" for diagrams and "graph" for graphs. The block must be written with the fence lines on their own lines: a line containing only \`\`\`diagram (or \`\`\`graph), then the JSON, then a line containing only \`\`\`. Never show the JSON without the fence. Never draw ASCII or text art, never use box-drawing characters, and never output image links. Write the working and explanation as normal text; the drawing does not replace it. Put the block after the explanation unless the student only asked for a drawing. Introduce it in a few words ("Here is the diagram:") and never mention JSON, specs, or code to the student. The JSON must be valid: double quotes, no comments, no trailing commas. Do not put any other text inside the block.
+const DIAGRAM_RULES = `DIAGRAMS AND GRAPHS: The app draws accurate diagrams and graphs from a JSON spec. When the student asks to show, draw, sketch, illustrate, plot or represent something, or when a diagram would clearly help (crystal planes and unit cells, forces, beams, circuits, lenses, graphs of functions), put exactly ONE fenced code block in your reply. Use the language "diagram" for diagrams and "graph" for graphs. The block must be written with the fence lines on their own lines: a line containing only \`\`\`diagram (or \`\`\`graph), then the JSON, then a line containing only \`\`\`. Never show the JSON without the fence. Never draw ASCII or text art, never use box-drawing characters, and never output image links. Write the working and explanation as normal text; the drawing does not replace it. Put the block after the explanation unless the student only asked for a drawing. Introduce it in a few words ("Here is the diagram:") and never mention JSON, specs, or code to the student. The JSON must be valid: double quotes, no comments, no trailing commas, and written on ONE single line (do not pretty-print or indent it). Leave a blank line before and after the block. Do not put any other text inside the block.
 
 DIAGRAM block (language "diagram"), pick the "type" that fits:
 1. Crystal plane in a unit cell: {"type":"miller_plane","h":3,"k":1,"l":2} (h, k, l are the Miller indices, whole numbers from -6 to 6; draw it for any "plane with Miller indices" or "unit cell with Miller indices" request).
@@ -1031,6 +1032,9 @@ ${closingLine}`
     }
 
     text = text.replace(/\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/gi, '')
+
+    // Whatever shape the model used for a drawing, send it as one clean block.
+    try { text = canonicalizeDrawings(text) } catch (e) { console.error('Drawing clean-up failed:', e?.message) }
 
     // With DEBUG_ERRORS=true in Vercel, each reply ends with the provider that wrote it.
     if (process.env.DEBUG_ERRORS === 'true' && servedBy) text += `\n\n_[served by ${servedBy}]_`
