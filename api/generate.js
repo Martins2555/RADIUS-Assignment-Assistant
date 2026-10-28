@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { sendPushToUser } from './_push.js'
 import { canonicalizeDrawings } from '../src/drawingExtract.js'
+import { getUserFromToken } from './_auth.js'
 
 // Uses the anon/publishable key — same key already used successfully by the
 // frontend for login — just to verify the incoming JWT belongs to a real,
@@ -307,11 +308,22 @@ export default async function handler(req, res) {
     { global: { headers: { Authorization: `Bearer ${token}` } } }
   )
   const rlPromise = Promise.resolve(supabaseAsUser.rpc('rl_check', { p_limit: 20, p_window_minutes: 60 }))
-  const { data: userData, error: authError } = await supabaseAuth.auth.getUser(token)
-  if (authError || !userData?.user) {
+  const { user: authedUser, error: authError, via: authVia } = await getUserFromToken(supabaseAuth, token, rlPromise)
+  const userData = { user: authedUser }
+  if (!authedUser) {
     console.error('Auth check failed:', authError?.message, authError?.status, authError)
-    return res.status(401).json({ error: 'Invalid or expired session' })
+    // The rate-limit call above was already counted. Give it back, so a
+    // failed login check never uses up the student's hourly requests.
+    try {
+      const rl = await rlPromise
+      if (rl && rl.status >= 200 && rl.status < 300) await supabaseAsUser.rpc('rl_refund')
+    } catch (e) { /* best-effort */ }
+    const busy = authError && (authError.status === 429 || authError.status >= 500)
+    if (busy) return res.status(503).json({ error: 'The login service is busy right now. Please tap Retry in a few seconds.' })
+    const dbg = process.env.DEBUG_ERRORS === 'true' ? ` [${authError?.status || ''} ${authError?.message || ''}]` : ''
+    return res.status(401).json({ error: 'Invalid or expired session' + dbg })
   }
+  if (authVia === 'token') console.error('Auth server check failed, accepted a valid signed token instead:', authError?.message, authError?.status)
 
   // Per-user rate limit: 20 requests/hour, enforced atomically in Postgres via
   // the check_rate_limit() function (see the SQL migration for it). Scoped
