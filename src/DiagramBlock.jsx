@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderDiagram, prepareFreeSvg, inferType, DIAGRAM_TYPES } from './diagrams.js'
 import { renderGraph } from './graphs.js'
 import { parseLoose } from './jsonLoose.js'
+import { canonicalizeDrawings } from './drawingExtract.js'
 
 // Fenced code blocks in a reply (```diagram, ```graph, ```svg) are drawn by
 // these components instead of being shown as code.
@@ -9,73 +10,10 @@ import { parseLoose } from './jsonLoose.js'
 export const DIAGRAM_FENCE_RE = /```(?:diagram|graph|svg)[^\n]*\n[\s\S]*?(?:```|$)/g
 
 
-// Counts { and } on a line, ignoring any inside JSON strings.
-function braceDelta(line) {
-  let d = 0
-  let inStr = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (inStr) {
-      if (ch === '\\') i++
-      else if (ch === '"') inStr = false
-    } else if (ch === '"') inStr = true
-    else if (ch === '{') d++
-    else if (ch === '}') d--
-  }
-  return d
-}
-
-// Sometimes the AI writes the drawing JSON without the ```diagram fence, which
-// would show as raw code. This finds such blocks (finished or still streaming)
-// and puts the fence back so they are drawn.
+// Puts any drawing the AI wrote (fenced or not, pretty-printed or not) into one
+// clean block that is always drawn. The same code runs on the server.
 export function normalizeDrawings(text) {
-  const src = String(text || '')
-  if (!src.includes('{')) return src
-  const lines = src.split('\n')
-  const out = []
-  let inFence = false
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const fenceOpen = !inFence && /^\s*```\s*([\w-]*)\s*$/.exec(line)
-    if (fenceOpen && PLAIN_LANGS.has(fenceOpen[1].toLowerCase())) {
-      let j = i + 1
-      const body = []
-      while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) { body.push(lines[j]); j++ }
-      const closed = j < lines.length
-      const raw = body.join('\n').trim()
-      if (raw.startsWith('{') && (closed ? jsonIsDrawing(raw) : DRAWING_START.test(raw.slice(0, 300)))) {
-        out.push('```diagram', ...body)
-        if (closed) out.push(lines[j])
-        i = closed ? j : lines.length
-        continue
-      }
-    }
-    if (/^\s*```/.test(line)) { inFence = !inFence; out.push(line); continue }
-    if (!inFence && /^\s*\{\s*("|$)/.test(line)) {
-      let depth = 0
-      let j = i
-      let closed = false
-      const buf = []
-      for (; j < lines.length; j++) {
-        buf.push(lines[j])
-        depth += braceDelta(lines[j])
-        if (depth <= 0) { closed = true; break }
-      }
-      const raw = buf.join('\n')
-      if (closed && jsonIsDrawing(raw)) {
-        out.push('```diagram', raw, '```')
-        i = j
-        continue
-      }
-      if (!closed && /"(type|curves|series|functions)"\s*:/.test(raw.slice(0, 240))) {
-        // Still streaming in: show the "Drawing..." card until it is complete.
-        out.push('```diagram', raw)
-        break
-      }
-    }
-    out.push(line)
-  }
-  return out.join('\n')
+  return canonicalizeDrawings(text)
 }
 
 // For copy / share / history: replace each drawing with a short note.

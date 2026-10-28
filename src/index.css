@@ -391,3 +391,13 @@ body {
   margin-bottom: 2px;
 }
 
+
+/* Wide equations scroll sideways inside the card instead of running off the phone screen. */
+.radius-markdown .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 0.25rem 0;
+  -webkit-overflow-scrolling: touch;
+}
+.radius-markdown .katex-display > .katex { white-space: nowrap; }
