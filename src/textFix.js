@@ -7,20 +7,57 @@
 // Inside a formula ";:;" is never intended (it comes from lost \; \: spacing).
 const tidyMath = (x) => x.trim().replace(/\s*;:;\s*/g, ' \\quad ')
 
+// Splits "A = B = C" into aligned lines so each new expression starts on a new
+// line. Only touches plain equation chains; anything already laid out is kept.
+function splitEquals(x) {
+  const body = x.trim()
+  if (/\\begin|\\\\|&|\\(?:Rightarrow|implies|therefore|because|quad|qquad|text\{\s*(?:and|or)\b)/.test(body)) return body
+  const idx = []
+  let depth = 0
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]
+    if (ch === '\\') { i++; continue }
+    if ('{(['.includes(ch)) depth++
+    else if ('})]'.includes(ch)) depth--
+    else if (depth === 0 && ch === ',') return body
+    else if (depth === 0 && ch === '=' && body[i - 1] !== '<' && body[i - 1] !== '>' && body[i + 1] !== '=') idx.push(i)
+  }
+  if (idx.length < 2) return body
+  const pieces = []
+  let last = 0
+  idx.forEach((i) => { pieces.push(body.slice(last, i).trim()); last = i + 1 })
+  pieces.push(body.slice(last).trim())
+  if (pieces.some((q, k) => !q && k > 0)) return body
+  const lines = pieces.map((q, k) => (k === 0 ? `${q} &= ${pieces[1]}` : k === 1 ? null : `&= ${q}`)).filter(Boolean)
+  return `\\begin{aligned}\n${lines.join(' \\\\\n')}\n\\end{aligned}`
+}
+
+// A line that is only maths ($...$ or $$...$$) becomes its own display
+// equation. Markdown joins neighbouring lines into one paragraph, which is
+// what ran whole solutions together on one line.
+function layoutMath(chunk) {
+  let s = chunk
+  // $$ ... $$ blocks (one line or many): own paragraph, equals chains split.
+  s = s.replace(/\$\$([\s\S]+?)\$\$/g, (m, x) => `\n\n$$\n${splitEquals(tidyMath(x))}\n$$\n\n`)
+  // A whole line that is a single inline $...$ (optionally ending . or ,)
+  s = s.replace(/^[ \t]*\$([^$\n]+)\$[ \t]*[.,;]?[ \t]*$/gm, (m, x) => `\n\n$$\n${splitEquals(tidyMath(x))}\n$$\n\n`)
+  return s.replace(/\n{3,}/g, '\n\n')
+}
+
 export function fixMath(text) {
   const src = String(text || '')
-  if (!/\\[[(]|^\s*\[/m.test(src)) return src
   // Never touch code: split it out and put it back unchanged.
   const parts = src.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
   return parts
     .map((p, i) => {
       if (i % 2 === 1) return p
-      return p
+      const fixed = p
         .replace(/(^|[^\\])\\\[([\s\S]*?)\\\]/g, (m, pre, x) => `${pre}\n\n$$\n${tidyMath(x)}\n$$\n\n`)
         .replace(/(^|[^\\])\\\(([\s\S]*?)\\\)/g, (m, pre, x) => `${pre}$${tidyMath(x)}$`)
         // a whole line, or a few lines, wrapped in bare [ ] that contain LaTeX commands
         .replace(/^[ \t]*\[[ \t]*\n([\s\S]*?\\[a-zA-Z]+[\s\S]*?)\n[ \t]*\][ \t]*$/gm, (m, x) => `\n$$\n${tidyMath(x)}\n$$\n`)
         .replace(/^[ \t]*\[[ \t]*([^\n\]]*\\[a-zA-Z]+[^\n]*?)[ \t]*\][ \t]*$/gm, (m, x) => `\n$$\n${tidyMath(x)}\n$$\n`)
+      return layoutMath(fixed)
     })
     .join('')
 }

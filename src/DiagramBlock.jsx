@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderDiagram, prepareFreeSvg, inferType, DIAGRAM_TYPES } from './diagrams.js'
 import { renderGraph } from './graphs.js'
+import { parseLoose } from './jsonLoose.js'
 
 // Fenced code blocks in a reply (```diagram, ```graph, ```svg) are drawn by
 // these components instead of being shown as code.
@@ -314,7 +315,7 @@ export function DiagramBlock({ kind, source, c, print }) {
       try { return { svg: prepareFreeSvg(source, pal) } } catch (e) { return { err: e.message } }
     }
     try {
-      const spec = JSON.parse(source.replace(/^\uFEFF/, ''))
+      const spec = parseLoose(source)
       const isGraph = kind === 'graph' || inferType(spec) === 'graph' || (spec && !spec.type && spec.points && !spec.parts)
       if (isGraph) return { graph: spec }
       return { diagram: renderDiagram(spec, pal) }
@@ -335,7 +336,7 @@ export function DiagramBlock({ kind, source, c, print }) {
 // True when a block of JSON is really a diagram or graph spec.
 export function jsonIsDrawing(source) {
   try {
-    const o = JSON.parse(source)
+    const o = parseLoose(source)
     const t = inferType(o)
     return t === 'graph' || DIAGRAM_TYPES.includes(t)
   } catch (e) {

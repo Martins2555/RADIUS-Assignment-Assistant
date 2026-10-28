@@ -1278,7 +1278,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         Log Out
       </button>
       <p style={{ color: c.subtext, fontSize: '0.72rem', textAlign: 'center', margin: '1rem 0 0', opacity: 0.8 }}>
-        RADIUS build 25 Oct 2026 (v4 maths fix)
+        RADIUS build 27 Oct 2026 (v5 step layout + circuit fix)
       </p>
     </div>
   )
