@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 import { sendPushToUser } from './_push.js'
-import { canonicalizeDrawings } from '../src/drawingExtract.js'
+import { finalizeDrawings, drawingBlock, checkSpec } from '../src/drawingExtract.js'
+import { parseLoose } from '../src/jsonLoose.js'
 import { getUserFromToken } from './_auth.js'
+import { verifiedFacts, auditArithmetic, arithmeticNote } from './_mathGuard.js'
 
 // Uses the anon/publishable key — same key already used successfully by the
 // frontend for login — just to verify the incoming JWT belongs to a real,
@@ -40,7 +42,7 @@ const VALID_ACTIONS = ['regen', 'explain', 'hint', 'quiz', 'summary', 'solution'
 const GRAPH_SPEC_HELP = `GRAPH block (language "graph"): {"title":"y = x^2 - 4x + 3","xlabel":"x","ylabel":"y","xmin":-2,"xmax":6,"ymin":-2,"ymax":8,"curves":[{"expr":"x^2 - 4*x + 3","label":"y = x^2 - 4x + 3"}],"series":[{"name":"Data","points":[[0,1],[1,3]],"line":true}],"points":[{"x":1,"y":2,"label":"A"}],"vlines":[{"x":2,"label":"x = 2"}],"hlines":[{"y":1,"label":"y = 1"}]}
 Graph rules: every field except "curves", "series" or "points" is optional. In "expr" use only x, numbers, + - * / ^, brackets, the functions sin cos tan asin acos atan sinh cosh tanh sqrt abs ln log exp, and the constants pi and e (angles in radians). Write each equation solved for y. For a circle or other curve that cannot be solved for y, use a parametric curve: {"param":{"x":"3*cos(t)","y":"3*sin(t)","t":[0,6.2832]},"label":"x^2 + y^2 = 9"}. Always set xmin and xmax (and ymin and ymax when you know sensible values) so the interesting part of the graph is visible. Use "dashed":true on a curve for a second or comparison curve. Intercepts and turning points are marked automatically, so do not add them as points.`
 
-const DIAGRAM_RULES = `DIAGRAMS AND GRAPHS: The app draws accurate diagrams and graphs from a JSON spec. When the student asks to show, draw, sketch, illustrate, plot or represent something, or when a diagram would clearly help (crystal planes and unit cells, forces, beams, circuits, lenses, graphs of functions), put exactly ONE fenced code block in your reply. Use the language "diagram" for diagrams and "graph" for graphs. The block must be written with the fence lines on their own lines: a line containing only \`\`\`diagram (or \`\`\`graph), then the JSON, then a line containing only \`\`\`. Never show the JSON without the fence. Never draw ASCII or text art, never use box-drawing characters, and never output image links. Write the working and explanation as normal text; the drawing does not replace it. Put the block after the explanation unless the student only asked for a drawing. Introduce it in a few words ("Here is the diagram:") and never mention JSON, specs, or code to the student. The JSON must be valid: double quotes, no comments, no trailing commas, and written on ONE single line (do not pretty-print or indent it). Leave a blank line before and after the block. Do not put any other text inside the block.
+const DIAGRAM_RULES = `DIAGRAMS AND GRAPHS: The app draws accurate diagrams and graphs from a JSON spec. When the student asks to show, draw, sketch, illustrate, plot or represent something, or when a diagram would clearly help (crystal planes and unit cells, forces, beams, circuits, lenses, graphs of functions), put exactly ONE fenced code block in your reply. Use the language "diagram" for diagrams and "graph" for graphs. The block must be written with the fence lines on their own lines: a line containing only \`\`\`diagram (or \`\`\`graph), then the JSON, then a line containing only \`\`\`. Never show the JSON without the fence, never put it in single backticks, and never write the word diagram or graph in front of it on the same line. The drawing must use exactly the same numbers as your answer. Never draw ASCII or text art, never use box-drawing characters, and never output image links. Write the working and explanation as normal text; the drawing does not replace it. Put the block after the explanation unless the student only asked for a drawing. Introduce it in a few words ("Here is the diagram:") and never mention JSON, specs, or code to the student. The JSON must be valid: double quotes, no comments, no trailing commas, and written on ONE single line (do not pretty-print or indent it). Leave a blank line before and after the block. Do not put any other text inside the block.
 
 DIAGRAM block (language "diagram"), pick the "type" that fits:
 1. Crystal plane in a unit cell: {"type":"miller_plane","h":3,"k":1,"l":2} (h, k, l are the Miller indices, whole numbers from -6 to 6; draw it for any "plane with Miller indices" or "unit cell with Miller indices" request).
@@ -51,6 +53,38 @@ DIAGRAM block (language "diagram"), pick the "type" that fits:
 6. Anything else (other diagrams, structures, flow charts, labelled figures): a block with the language "svg" containing one complete <svg> element, written like this: start with <svg viewBox="0 0 380 H"> where H is at most 420; use only svg, g, path, line, polyline, polygon, rect, circle, ellipse, text, tspan, defs and marker; no scripts, images, styles or classes. For every colour use only the words "TEXT" (lines and text), "MUTED" (secondary or hidden lines) and "ACCENT" (the highlighted part), or "none", for example stroke="TEXT" fill="none" or fill="ACCENT". Put arrowhead markers in <defs> with fill="TEXT". Text must be at least 11 px (font-size="12") and every label must stay inside the viewBox, clear of lines and of other labels. Keep it simple and exact, and double-check coordinates. Use this "svg" block only when none of the five types above fits.
 
 ${GRAPH_SPEC_HELP}`
+
+// Last resort for a drawing the student asked for but did not get. Asks the
+// model for ONLY the drawing spec in JSON mode (the reply is guaranteed to be
+// JSON), checks it by really drawing it, and returns it or null. Never throws.
+async function aiDrawingSpec({ question, reply }) {
+  try {
+    const key = process.env.GEMINI_API_KEY
+    if (!key) return null
+    const model = 'gemini-3.7-flash'
+    const prompt = `${DIAGRAM_RULES}\n\nIGNORE the instructions above about code fences and about writing text. Your whole reply must be ONE raw JSON object: the spec of the single best drawing for the student's request. Use one of the types listed (never the "svg" kind). Use exactly the numbers from the answer already given.\n\nSTUDENT'S REQUEST:\n${String(question || '').slice(0, 2000)}\n\nANSWER ALREADY GIVEN:\n${String(reply || '').slice(0, 6000)}`
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.1, maxOutputTokens: 1500, thinkingConfig: { thinkingLevel: 'low' } },
+        }),
+        signal: AbortSignal.timeout(8000),
+      }
+    )
+    const data = await response.json().catch(() => null)
+    if (!response.ok) { console.error('Drawing retry failed:', response.status); return null }
+    const raw = (data?.candidates?.[0]?.content?.parts || []).filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
+    const spec = checkSpec(parseLoose(raw))
+    return spec
+  } catch (e) {
+    console.error('Drawing retry error:', e?.message)
+    return null
+  }
+}
 
 // A reply that breaks off can stop in the middle of a formula or code block.
 // Close it so the note after it is not swallowed (and painted as a maths error).
@@ -465,16 +499,24 @@ export default async function handler(req, res) {
   } else if (tool === 'project') {
     projectBlock = '\n\nPROJECT MATERIAL: no project is selected. Ask the student to pick or create a project first.'
   }
+  // Exact answers for fixed-formula problems (Miller indices, lens, simple beams, resistors).
+  // Worked out in plain code in a few milliseconds, then handed to the AI as known-correct numbers.
+  const lastUserTurn = Array.isArray(history)
+    ? [...history].reverse().find((h) => h && h.role === 'user' && typeof h.content === 'string')
+    : null
+  const guardQuestion = rawAssignmentText || (lastUserTurn ? lastUserTurn.content : '')
+  const factsBlock = ['chat', 'pastq'].includes(effTool) ? verifiedFacts(guardQuestion) : ''
   const actionLine = actionInstruction(action)
 
   // Diagram rules go wherever a drawing could help. Graph mode already carries its own copy of the graph rules.
   const diagramBlock = ['chat', 'project', 'pastq', 'notes'].includes(effTool) ? DIAGRAM_RULES : ''
 
+  // Prompt order matters for speed: Gemini re-uses the start of a prompt that is identical
+  // to a recent one, so the fixed rules come first and the lines that change per student or
+  // per message (name, subject, project text, chip action, date) come last.
   const systemInstruction = `You are RADIUS, an assignment assistant for students.
 
 CREATOR INFO — IMPORTANT: Only mention who developed you if the student directly and explicitly asks (e.g. "who made you", "who developed you", "who created RADIUS"). In that case, and only that case, say you were developed by Martins Chimezie Obasi, and never mention Google, Gemini, or any other company. Do NOT bring this up unprompted — not in greetings, not in your first reply, not anywhere else unless directly asked.
-
-${nicknameLine}
 
 CASUAL GREETINGS: If the student just says something like "hi", "hello", or another simple greeting with no actual question or assignment attached, reply briefly and warmly — introduce yourself as RADIUS and ask what assignment or subject they need help with. Do not mention your creator, your tech stack, or give a long introduction in this case.
 
@@ -482,12 +524,6 @@ RESPONSE TAGGING — REQUIRED: As the very first thing in your reply, before any
 [TYPE:ASSIGNMENT] if this message is a real academic/assignment/study question you are actually answering or working through.
 [TYPE:GENERAL] if it is a greeting, small talk, feedback, or a question about RADIUS itself rather than an academic question.
 Then continue your normal reply starting on the next line. Never explain or mention this tag to the student.
-
-${modeLine}${projectBlock}
-
-${actionLine}
-
-Answer length preference: ${styleLine}
 
 STRICT INSTRUCTION FOLLOWING:
 - If the student specifies a word count, length, number of points, or any other explicit constraint, you MUST follow it exactly. Count before responding. Do not pad with filler or fall short.
@@ -507,11 +543,21 @@ MATH FORMATTING RULES (calculative mode). Follow this layout for every worked so
 
 TABLES: When the student asks for a table, a comparison, a schedule, or any tabulated data, output a valid GitHub-flavoured markdown table: one header row, then a separator row like | --- | --- |, then each data row on its own line, with exactly the same number of columns in every row. Put a blank line before and after the table. Keep cell text short with no line breaks inside cells, and write every row before any commentary. Use - for a value you do not know instead of guessing. Put your verdict or summary in one or two sentences after the table, never inside it.
 
-CURRENT INFORMATION: Today's date is ${todayText}. Your built-in knowledge stops at an earlier date, so newer products, events, releases, prices, rules and research may exist that you do not know about. Never tell the student that something does not exist, has not been released, or has not happened just because you do not recognise it. If a WEB SEARCH RESULTS block is included in the student's message, treat it as newer than your training and base your answer on it, referring to a result as [1], [2] and so on only when you actually used it, and never mentioning the search at all when it was not relevant to what the student said. If it does not answer the question, say so. If there are no search results, say you cannot confirm the very latest details and give your best understanding without denying anything. Never present rumours or guesses as confirmed facts, and never describe a past year as the present.
-
 IMAGES: If the student attaches images or files, they may contain handwritten or printed assignments, problems, or questions — possibly spanning multiple pages or multiple related items. Read all of them carefully and respond to what they actually contain, treating them as one combined assignment unless they clearly look unrelated.
 
 ${diagramBlock}
+
+${nicknameLine}
+
+${modeLine}${projectBlock}
+
+${factsBlock}
+
+${actionLine}
+
+Answer length preference: ${styleLine}
+
+CURRENT INFORMATION: Today's date is ${todayText}. Your built-in knowledge stops at an earlier date, so newer products, events, releases, prices, rules and research may exist that you do not know about. Never tell the student that something does not exist, has not been released, or has not happened just because you do not recognise it. If a WEB SEARCH RESULTS block is included in the student's message, treat it as newer than your training and base your answer on it, referring to a result as [1], [2] and so on only when you actually used it, and never mentioning the search at all when it was not relevant to what the student said. If it does not answer the question, say so. If there are no search results, say you cannot confirm the very latest details and give your best understanding without denying anything. Never present rumours or guesses as confirmed facts, and never describe a past year as the present.
 
 ${closingLine}`
 
@@ -828,6 +874,8 @@ ${closingLine}`
       try { json = JSON.parse(payload) } catch (e) { return }
       const fr = json?.candidates?.[0]?.finishReason
       if (fr) finishReason = fr
+      const um = json?.usageMetadata
+      if (um && um.cachedContentTokenCount != null) console.log(`Prompt cache: ${um.cachedContentTokenCount} of ${um.promptTokenCount} tokens re-used`)
       const parts = json?.candidates?.[0]?.content?.parts || []
       const piece = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
       if (piece) {
@@ -1047,7 +1095,31 @@ ${closingLine}`
     text = text.replace(/\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/gi, '')
 
     // Whatever shape the model used for a drawing, send it as one clean block.
-    try { text = canonicalizeDrawings(text) } catch (e) { console.error('Drawing clean-up failed:', e?.message) }
+    // The final pass also repairs cut-off drawings, swaps one that cannot be
+    // drawn for a safe one worked out from the question, and quietly removes
+    // anything unusable, so the student never sees raw JSON or a stuck card.
+    try {
+      const drawQuestion = guardQuestion
+      const fin = finalizeDrawings(text, { question: drawQuestion, tool: effTool })
+      text = fin.text
+      // Asked for a drawing and still none (a beam, a circuit...): one quick, focused retry.
+      if (fin.wanted && DEADLINE - Date.now() > 14000) {
+        const spec = await aiDrawingSpec({ question: drawQuestion, reply: text })
+        if (spec) text = text.trimEnd() + drawingBlock(spec)
+      }
+    } catch (e) { console.error('Drawing clean-up failed:', e?.message) }
+
+    // Re-add the plain number lines of a worked solution (code only, no AI call). If one does not
+    // add up, say so in one short line instead of leaving a wrong number unflagged.
+    if (['chat', 'pastq', 'project'].includes(effTool)) {
+      try {
+        const slips = auditArithmetic(text)
+        if (slips.length) {
+          text += arithmeticNote(slips)
+          console.log(`Arithmetic check flagged ${slips.length} line(s): ${slips[0].line}`)
+        }
+      } catch (e) { console.error('Arithmetic check failed:', e?.message) }
+    }
 
     // With DEBUG_ERRORS=true in Vercel, each reply ends with the provider that wrote it.
     if (process.env.DEBUG_ERRORS === 'true' && servedBy) text += `\n\n_[served by ${servedBy}]_`
