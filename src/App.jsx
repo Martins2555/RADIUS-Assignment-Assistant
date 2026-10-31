@@ -1278,7 +1278,7 @@ function SettingsBody({ session, theme, themePreference, setThemePreference, acc
         Log Out
       </button>
       <p style={{ color: c.subtext, fontSize: '0.72rem', textAlign: 'center', margin: '1rem 0 0', opacity: 0.8 }}>
-        RADIUS build 28 Oct 2026 (v8 swipe fix)
+        RADIUS build 28 Oct 2026 (v9 symbols + drawings)
       </p>
     </div>
   )
