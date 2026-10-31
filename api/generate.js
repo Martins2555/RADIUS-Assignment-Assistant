@@ -500,6 +500,7 @@ MATH FORMATTING RULES (calculative mode). Follow this layout for every worked so
 - Show the working in this order, each part on its own line: the formula in symbols, then the substitution with numbers, then the result. Whenever an expression is set equal to a new expression, start a new line. For a chain, use \\begin{aligned} A &= B \\\\ &= C \\\\ &= D \\end{aligned} with the equals signs lined up, never A = B = C = D on one line.
 - Always write units with numbers, using \\text{ kN}, \\text{ m}, \\text{ V} and so on, and write fractions with \\frac{numerator}{denominator}, never as a slash.
 - Put each final answer in its own display block as \\boxed{R_B = 13.75 \\text{ kN}}, with direction or sign when it matters. End with a "### Final Answer" section that lists every boxed result once, each on its own line.
+- Never put a backslash command inside \\text{...}. For a direction, write it in words, for example \\boxed{R_A = 12.25 \\text{ kN (upward)}}, never \\uparrow inside \\text.
 - Optionally finish with one "Check:" line that verifies the answer a second way.
 - Show every algebra manipulation, do not skip steps, and never describe maths in plain prose when it can be shown as an equation. Keep the sentences short.
 - Never use the long dash character anywhere.
