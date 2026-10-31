@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderDiagram, prepareFreeSvg, inferType, DIAGRAM_TYPES } from './diagrams.js'
 import { renderGraph } from './graphs.js'
 import { parseLoose } from './jsonLoose.js'
-import { canonicalizeDrawings } from './drawingExtract.js'
+import { canonicalizeDrawings, normalizeSpec } from './drawingExtract.js'
 
 // Fenced code blocks in a reply (```diagram, ```graph, ```svg) are drawn by
 // these components instead of being shown as code.
@@ -31,44 +31,57 @@ function looksIncomplete(kind, source) {
   return !t.endsWith('}')
 }
 
-// Turns the drawing into a PNG and shares it (phones) or downloads it.
-async function saveAsPng(svgMarkup, width, height, bg, name) {
-  const scale = Math.min(3, 1600 / width)
-  const w = Math.round(width * scale)
-  const h = Math.round(height * scale)
-  const sized = svgMarkup.replace('width="100%"', `width="${w}" height="${h}"`)
-  const url = URL.createObjectURL(new Blob([sized], { type: 'image/svg+xml;charset=utf-8' }))
+// Downloads use a clean white page with dark ink, so the picture is easy to
+// read, print or paste into an assignment whatever theme the app is in.
+const EXPORT_PAL = { text: '#111827', sub: '#4b5563', accent: '#16a34a', bg: '#ffffff', grid: '#d1d5db' }
+
+// The drawing as a standalone SVG file at a given pixel scale, on a white page.
+function exportSvg(out, scale) {
+  const w = Math.round(out.width * scale)
+  const h = Math.round(out.height * scale)
+  let s = String(out.svg)
+  const root = /<svg[^>]*>/.exec(s)
+  if (!root) throw new Error('no drawing')
+  let tag = root[0].replace(/\swidth="[^"]*"/, '').replace(/\sheight="[^"]*"/, '').replace('<svg', `<svg width="${w}" height="${h}"`)
+  if (!/\sxmlns=/.test(tag)) tag = tag.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"')
+  s = s.replace(root[0], tag + '<rect width="100%" height="100%" fill="#ffffff"/>')
+  return s
+}
+
+async function toImageBlob(out, format, scale) {
+  const w = Math.round(out.width * scale)
+  const h = Math.round(out.height * scale)
+  const url = URL.createObjectURL(new Blob([exportSvg(out, scale)], { type: 'image/svg+xml;charset=utf-8' }))
   try {
     const img = await new Promise((resolve, reject) => {
       const im = new Image()
       im.onload = () => resolve(im)
-      im.onerror = reject
+      im.onerror = () => reject(new Error('image'))
       im.src = url
     })
     const canvas = document.createElement('canvas')
     canvas.width = w
     canvas.height = h
     const ctx = canvas.getContext('2d')
-    ctx.fillStyle = bg
+    ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, w, h)
     ctx.drawImage(img, 0, 0, w, h)
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, format === 'jpg' ? 'image/jpeg' : 'image/png', 0.95))
     if (!blob) throw new Error('no image')
-    const file = new File([blob], `${name}.png`, { type: 'image/png' })
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: 'RADIUS' }); return 'Shared' } catch (e) { if (e && e.name === 'AbortError') return '' }
-    }
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = file.name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000)
-    return 'Saved'
+    return blob
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+function saveBlob(blob, filename) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000)
 }
 
 function Frame({ c, children }) {
@@ -105,31 +118,46 @@ function SmallBtn({ c, onClick, active, children, label }) {
   )
 }
 
-function useSave(c, name) {
+// "Download" opens a small choice of file types. getOut() draws the picture
+// again in the printable colours and returns { svg, width, height }.
+function DownloadControl({ c, name, getOut }) {
+  const [open, setOpen] = useState(false)
   const [status, setStatus] = useState('')
   const timer = useRef(null)
   useEffect(() => () => clearTimeout(timer.current), [])
-  const save = async (out) => {
+  const run = async (format) => {
+    setStatus('Preparing...')
     try {
-      const msg = await saveAsPng(out.svg, out.width, out.height, c.surfaceAlt, name)
-      setStatus(msg)
+      const out = getOut()
+      const file = `${name}-${new Date().toISOString().slice(0, 10)}.${format}`
+      const blob = format === 'svg'
+        ? new Blob([exportSvg(out, 1)], { type: 'image/svg+xml' })
+        : await toImageBlob(out, format, Math.max(2, Math.min(4, 1800 / out.width)))
+      saveBlob(blob, file)
+      setStatus(`Downloaded ${format.toUpperCase()}`)
+      setOpen(false)
     } catch (e) {
-      setStatus('Could not save')
+      setStatus('Please try again')
     }
     clearTimeout(timer.current)
     timer.current = setTimeout(() => setStatus(''), 2500)
   }
-  return [status, save]
+  return (
+    <>
+      <SmallBtn c={c} active={open} label="Download this picture" onClick={() => setOpen((v) => !v)}>Download</SmallBtn>
+      {open && ['png', 'jpg', 'svg'].map((f) => <SmallBtn key={f} c={c} label={`Download as ${f.toUpperCase()}`} onClick={() => run(f)}>{f.toUpperCase()}</SmallBtn>)}
+      {status ? <span style={{ fontSize: '0.74rem', color: c.subtext }}>{status}</span> : null}
+    </>
+  )
 }
 
-function DiagramView({ out, c, name, print }) {
-  const [status, save] = useSave(c, name)
+function DiagramView({ out, c, name, print, getOut }) {
   return (
     <Frame c={c}>
       <div style={{ padding: '0.6rem 0.4rem 0' }} dangerouslySetInnerHTML={{ __html: out.svg }} />
       {!print && (
-        <Bar c={c} status={status}>
-          <SmallBtn c={c} onClick={() => save(out)}>Save image</SmallBtn>
+        <Bar c={c}>
+          <DownloadControl c={c} name={name} getOut={getOut} />
         </Bar>
       )}
     </Frame>
@@ -140,7 +168,6 @@ function GraphView({ spec, c, print }) {
   const pal = useMemo(() => paletteFrom(c), [c.text, c.subtext, c.accent, c.surfaceAlt, c.border])
   const [view, setView] = useState(null)
   const [explore, setExplore] = useState(false)
-  const [status, save] = useSave(c, 'radius-graph')
   const boxRef = useRef(null)
   const viewRef = useRef(null)
   const ptrs = useRef(new Map())
@@ -221,7 +248,7 @@ function GraphView({ spec, c, print }) {
     pinch.current = 0
   }
 
-  if (out.err) return <Note c={c} text={`I could not draw this graph (${out.err}). Try asking again.`} />
+  if (out.err) return null
   return (
     <Frame c={c}>
       <div
@@ -233,48 +260,70 @@ function GraphView({ spec, c, print }) {
         style={{ padding: '0.6rem 0.4rem 0', touchAction: explore ? 'none' : 'auto', cursor: explore ? 'grab' : 'default', userSelect: 'none' }}
         dangerouslySetInnerHTML={{ __html: out.ok.svg }}
       />
-      {!print && <Bar c={c} status={status || (explore ? 'Drag to move, pinch to zoom' : '')}>
+      {!print && <Bar c={c} status={explore ? 'Drag to move, pinch to zoom' : ''}>
         <SmallBtn c={c} active={explore} onClick={() => setExplore((v) => !v)}>{explore ? 'Done' : 'Explore'}</SmallBtn>
         {explore && <SmallBtn c={c} label="Zoom in" onClick={() => zoomAt(0.7)}>+</SmallBtn>}
         {explore && <SmallBtn c={c} label="Zoom out" onClick={() => zoomAt(1 / 0.7)}>{'\u2212'}</SmallBtn>}
         {explore && view && <SmallBtn c={c} onClick={() => setView(null)}>Reset</SmallBtn>}
-        <SmallBtn c={c} onClick={() => save(out.ok)}>Save image</SmallBtn>
+        <DownloadControl c={c} name="radius-graph" getOut={() => renderGraph(spec, EXPORT_PAL, view)} />
       </Bar>}
-      {out.ok.notes.length > 0 && <div style={{ padding: '0 0.8rem 0.6rem', fontSize: '0.74rem', color: c.subtext }}>Skipped: {out.ok.notes.join('; ')}</div>}
+      {out.ok.notes.length > 0 && <div style={{ padding: '0 0.8rem 0.6rem', fontSize: '0.74rem', color: c.subtext }}>Some curves could not be drawn, so they are left out.</div>}
     </Frame>
   )
 }
 
+// Reads and draws one block. partial: also repair a block that was cut off.
+function build(kind, source, pal, partial) {
+  if (kind === 'svg') {
+    try { return { svg: prepareFreeSvg(source, pal), free: true } } catch (e) { return { err: e.message || 'error' } }
+  }
+  try {
+    const spec = normalizeSpec(parseLoose(source, partial ? { partial: true } : undefined))
+    const isGraph = kind === 'graph' || inferType(spec) === 'graph' || (spec && !spec.type && spec.points && !spec.parts)
+    if (isGraph) {
+      renderGraph(spec, pal) // throws when there is nothing to plot
+      return { graph: spec }
+    }
+    return { diagram: renderDiagram(spec, pal), spec }
+  } catch (e) {
+    return { err: e.message || 'error' }
+  }
+}
+
 // One drawing from a fenced block. kind: 'diagram' | 'graph' | 'svg' | 'json'
+// The student never sees an error here: a drawing is either shown, or (while
+// the reply is still arriving) a short "Drawing..." card, or nothing at all.
 export function DiagramBlock({ kind, source, c, print }) {
   const pal = useMemo(() => paletteFrom(c), [c.text, c.subtext, c.accent, c.surfaceAlt, c.border])
-  const parsed = useMemo(() => {
-    if (kind === 'svg') {
-      try { return { svg: prepareFreeSvg(source, pal) } } catch (e) { return { err: e.message } }
-    }
-    try {
-      const spec = parseLoose(source)
-      const isGraph = kind === 'graph' || inferType(spec) === 'graph' || (spec && !spec.type && spec.points && !spec.parts)
-      if (isGraph) return { graph: spec }
-      return { diagram: renderDiagram(spec, pal) }
-    } catch (e) {
-      return { err: e.message || 'error' }
-    }
-  }, [kind, source, pal])
+  const parsed = useMemo(() => build(kind, source, pal, false), [kind, source, pal])
+  const incomplete = !!parsed.err && looksIncomplete(kind, source)
 
-  if (parsed.err) {
-    if (looksIncomplete(kind, source)) return <Note c={c} text="Drawing..." />
-    return <Note c={c} text={`I could not draw this one (${parsed.err}). Ask RADIUS to try again.`} />
+  // A block that stays unfinished (old chats, replies that were cut off) is
+  // repaired after a few seconds instead of waiting forever.
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    setSettled(false)
+    if (!incomplete) return undefined
+    const t = setTimeout(() => setSettled(true), 4000)
+    return () => clearTimeout(t)
+  }, [source, incomplete])
+  const healed = useMemo(() => (settled && parsed.err && kind !== 'svg' ? build(kind, source, pal, true) : null), [settled, parsed, kind, source, pal])
+  const shown = parsed.err ? (healed && !healed.err ? healed : null) : parsed
+
+  if (!shown) {
+    if (incomplete && !settled) return <Note c={c} text="Drawing..." />
+    return null
   }
-  if (parsed.graph) return <GraphView spec={parsed.graph} c={c} print={print} />
-  const out = parsed.svg || parsed.diagram
-  return <DiagramView out={out} c={c} name={`radius-${kind === 'svg' ? 'drawing' : 'diagram'}`} print={print} />
+  if (shown.graph) return <GraphView spec={shown.graph} c={c} print={print} />
+  const out = shown.svg || shown.diagram
+  const exportOut = () => (shown.free ? prepareFreeSvg(source, EXPORT_PAL) : renderDiagram(shown.spec, EXPORT_PAL))
+  return <DiagramView out={out} c={c} name={`radius-${kind === 'svg' ? 'drawing' : 'diagram'}`} print={print} getOut={exportOut} />
 }
 
 // True when a block of JSON is really a diagram or graph spec.
 export function jsonIsDrawing(source) {
   try {
-    const o = parseLoose(source)
+    const o = normalizeSpec(parseLoose(source))
     const t = inferType(o)
     return t === 'graph' || DIAGRAM_TYPES.includes(t)
   } catch (e) {

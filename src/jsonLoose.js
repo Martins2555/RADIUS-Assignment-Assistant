@@ -3,6 +3,9 @@
 // code fences, // and /* */ comments, trailing commas, single quotes, curly
 // quotes, unquoted keys, True/False/None, and words after the closing brace.
 // parseLoose(text) returns the value, or throws an Error with a short reason.
+// parseLoose(text, { partial: true }) also repairs a reply that was cut off in
+// the middle: unfinished text, objects and lists are closed, and a half-written
+// last item is dropped.
 
 const SMART = { '\u201C': '"', '\u201D': '"', '\u201E': '"', '\u2018': "'", '\u2019': "'" }
 
@@ -13,11 +16,13 @@ function stripFence(s) {
   return t
 }
 
-export function parseLoose(input) {
+export function parseLoose(input, opts) {
+  const partial = !!(opts && opts.partial)
   const src = stripFence(input)
   let i = src.search(/[{[]/)
   if (i < 0) throw new Error('no JSON found')
   const n = src.length
+  let dirty = false // true when the text stopped in the middle of an item
 
   const fail = (msg) => { throw new Error(msg || 'bad JSON') }
   const isWs = (ch) => ch === ' ' || ch === '\n' || ch === '\r' || ch === '\t' || ch === '\u00A0'
@@ -54,7 +59,7 @@ export function parseLoose(input) {
         else if (nx === 'u') {
           const hex = src.slice(i, i + 4)
           if (/^[0-9a-fA-F]{4}$/.test(hex)) { out += String.fromCharCode(parseInt(hex, 16)); i += 4 } else out += '\\u'
-        } else if (nx === undefined) fail('unfinished text')
+        } else if (nx === undefined) { if (partial) { dirty = true; return out } fail('unfinished text') }
         else if (nx === '\n') { /* line continuation */ }
         // An unknown escape such as \Omega or \( keeps its backslash, so maths survives.
         else if ('"\'\\/'.includes(nx)) out += nx
@@ -65,6 +70,7 @@ export function parseLoose(input) {
       out += ch
       i++
     }
+    if (partial) { dirty = true; return out }
     return fail('unfinished text')
   }
 
@@ -114,18 +120,23 @@ export function parseLoose(input) {
     i++
     for (;;) {
       skip()
-      if (i >= n) fail('unfinished JSON')
+      if (i >= n) { if (partial) return o; fail('unfinished JSON') }
       if (src[i] === '}') { i++; return o }
       if (src[i] === ',') { i++; continue }
       const k = key()
       skip()
+      if (i >= n && partial) { dirty = true; return o }
       if (src[i] !== ':') fail('missing ":"')
       i++
-      o[k] = value()
+      skip()
+      if (i >= n && partial) { dirty = true; return o }
+      let v
+      try { v = value() } catch (e) { if (partial && i >= n) { dirty = true; return o } throw e }
+      o[k] = v
       skip()
       if (src[i] === ',') i++
       else if (src[i] !== '}') {
-        if (i >= n) fail('unfinished JSON')
+        if (i >= n) { if (partial) return o; fail('unfinished JSON') }
         fail('missing ","')
       }
     }
@@ -136,14 +147,17 @@ export function parseLoose(input) {
     i++
     for (;;) {
       skip()
-      if (i >= n) fail('unfinished JSON')
+      if (i >= n) { if (partial) return a; fail('unfinished JSON') }
       if (src[i] === ']') { i++; return a }
       if (src[i] === ',') { i++; continue }
-      a.push(value())
+      let v
+      try { v = value() } catch (e) { if (partial && i >= n) { dirty = false; return a } throw e }
+      if (partial && dirty) { dirty = false; return a } // half-written last item: drop it
+      a.push(v)
       skip()
       if (src[i] === ',') i++
       else if (src[i] !== ']') {
-        if (i >= n) fail('unfinished JSON')
+        if (i >= n) { if (partial) return a; fail('unfinished JSON') }
         fail('missing ","')
       }
     }
