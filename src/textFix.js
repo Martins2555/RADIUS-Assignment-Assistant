@@ -55,6 +55,24 @@ function layoutMath(chunk) {
   return s.replace(/\n{3,}/g, '\n\n')
 }
 
+// True when the text so far ends inside $...$ or $$...$$.
+function insideMath(before) {
+  let disp = false
+  let inl = false
+  for (const m of before.matchAll(/\\\$|\$\$|\$/g)) {
+    if (m[0] === '\\$') continue
+    if (m[0] === '$$') { if (!inl) disp = !disp } else if (!disp) inl = !inl
+  }
+  return disp || inl
+}
+
+// A bare \begin{aligned}...\end{aligned} (or cases, matrices...) with no $$ around it
+// (the AI forgot them) becomes its own display equation, so it draws instead of printing code.
+const ENV_RE = /\\begin\{(aligned|alignedat|gathered|split|cases|array|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|align\*?|eqnarray\*?)\}[\s\S]*?\\end\{\1\}/g
+function wrapBareEnvs(chunk) {
+  return chunk.replace(ENV_RE, (m, env, offset, whole) => (insideMath(whole.slice(0, offset)) ? m : '\n\n$$\n' + m + '\n$$\n\n'))
+}
+
 // A bare \boxed{...} (the AI forgot the $$ around it) becomes its own display equation,
 // one per line, instead of showing as raw code.
 function wrapBareBoxed(chunk) {
@@ -94,7 +112,7 @@ export function fixMath(text) {
         // a whole line, or a few lines, wrapped in bare [ ] that contain LaTeX commands
         .replace(/^[ \t]*\[[ \t]*\n([\s\S]*?\\[a-zA-Z]+[\s\S]*?)\n[ \t]*\][ \t]*$/gm, (m, x) => `\n$$\n${tidyMath(x)}\n$$\n`)
         .replace(/^[ \t]*\[[ \t]*([^\n\]]*\\[a-zA-Z]+[^\n]*?)[ \t]*\][ \t]*$/gm, (m, x) => `\n$$\n${tidyMath(x)}\n$$\n`)
-      return layoutMath(fixTextCommands(wrapBareBoxed(fixed)))
+      return layoutMath(fixTextCommands(wrapBareBoxed(wrapBareEnvs(fixed))))
     })
     .join('')
 }
