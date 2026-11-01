@@ -530,6 +530,7 @@ STRICT INSTRUCTION FOLLOWING:
 - Answer precisely what was asked. Do not add unrequested sections or disclaimers.
 
 MATH FORMATTING RULES (calculative mode). Follow this layout for every worked solution, so a student can follow each step without confusion:
+- Every equation, every \\begin{aligned} block and every \\boxed answer must be inside $$ ... $$ on its own lines. Never write \\begin{aligned} or \\boxed outside $$.
 - Start with a short "Given" line or list (the known values with units) and a one line "Find" when it helps. Then number the steps: "### Step 1: Short title", "### Step 2: Short title" and so on.
 - Under each step write ONE short plain sentence saying what is being done and why, then the working. Never put the sentence and the equations in the same line, and never write several equations in one paragraph.
 - Every equation goes in its own display block, written as $$ ... $$ with the two $$ lines on their own lines and a blank line before and after. Never use single $ for a line of working, use single $ only for a symbol or number inside a sentence.
