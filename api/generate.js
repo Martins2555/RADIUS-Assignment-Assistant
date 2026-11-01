@@ -4,6 +4,7 @@ import { finalizeDrawings, drawingBlock, checkSpec } from '../src/drawingExtract
 import { parseLoose } from '../src/jsonLoose.js'
 import { getUserFromToken } from './_auth.js'
 import { verifiedFacts, auditArithmetic, arithmeticNote } from './_mathGuard.js'
+import { buildVisionMessages } from './_vision.js'
 
 // Uses the anon/publishable key — same key already used successfully by the
 // frontend for login — just to verify the incoming JWT belongs to a real,
@@ -26,6 +27,14 @@ const OPENAI_COMPAT_PROVIDERS = [
   { name: 'mistral', url: 'https://api.mistral.ai/v1/chat/completions', keyEnv: 'MISTRAL_API_KEY', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' },
   { name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', keyEnv: 'CEREBRAS_API_KEY', model: process.env.CEREBRAS_MODEL || 'llama-3.3-70b' },
   { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', keyEnv: 'OPENROUTER_API_KEY', model: process.env.OPENROUTER_MODEL || 'openrouter/free' },
+]
+
+// Backups that can also read photos. Used after Gemini, only when every attachment is an image
+// (see api/_vision.js). Change the models from Vercel env vars if a provider retires one.
+const VISION_PROVIDERS = [
+  { name: 'mistral', url: 'https://api.mistral.ai/v1/chat/completions', keyEnv: 'MISTRAL_API_KEY', model: process.env.MISTRAL_VISION_MODEL || 'mistral-small-latest' },
+  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', keyEnv: 'GROQ_API_KEY', model: process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct' },
+  { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', keyEnv: 'OPENROUTER_API_KEY', model: process.env.OPENROUTER_VISION_MODEL || 'openrouter/free' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -660,7 +669,7 @@ ${closingLine}`
   // safety nets when the newest one is rate limited or busy. The 3.8 model ID is
   // "gemini-3.8-flash" (plain "gemini-3.8" does not exist and returns 404).
   // Set GEMINI_MODELS_ORDER in Vercel (comma separated) to change the order.
-  const GEMINI_MODELS = (process.env.GEMINI_MODELS_ORDER || 'gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash')
+  const GEMINI_MODELS = (process.env.GEMINI_MODELS_ORDER || 'gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash-lite')
     .split(',')
     .map((m) => m.trim())
     .filter(Boolean)
@@ -698,6 +707,8 @@ ${closingLine}`
       content: c.parts.filter((p) => p.text).map((p) => p.text).join('\n'),
     })),
   ]
+  // Same conversation with the photos included, for the backup providers that can read images.
+  const visionMessages = hasFiles ? buildVisionMessages(chatMessages, contents) : null
 
   async function tryGemini(model) {
     const response = await fetch(
@@ -911,9 +922,10 @@ ${closingLine}`
     let timer = setTimeout(() => ac.abort(), 8000)
     const touch = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), IDLE_MS) }
     try {
+      const baseMessages = provider.messages || chatMessages
       const messages = carry
-        ? [...chatMessages, { role: 'assistant', content: carry }, { role: 'user', content: CONTINUE_NOTE }]
-        : chatMessages
+        ? [...baseMessages, { role: 'assistant', content: carry }, { role: 'user', content: CONTINUE_NOTE }]
+        : baseMessages
       const response = await fetch(provider.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env[provider.keyEnv]}` },
@@ -973,7 +985,7 @@ ${closingLine}`
       },
       body: JSON.stringify({
         model: provider.model,
-        messages: chatMessages,
+        messages: provider.messages || chatMessages,
         max_tokens: 4096,
         ...extraBody(provider),
       }),
@@ -1008,8 +1020,15 @@ ${closingLine}`
       attempts.push({ label: `gemini:${model}`, retryOnBusy: true, run: () => (wantStream ? tryGeminiStream(model) : tryGemini(model)) })
     }
   }
-  // Other providers only take text. If the message has images/PDFs, only
-  // Gemini can read them, so the fallback chain is skipped for those.
+  // Text-only backups. If the message has attachments they are skipped: photos go to the
+  // vision backups above, and PDFs can only be read by Gemini.
+  if (hasFiles && visionMessages) {
+    for (const provider of VISION_PROVIDERS) {
+      if (process.env[provider.keyEnv]) {
+        attempts.push({ label: `${provider.name}-vision:${provider.model}`, retryOnBusy: false, run: compatRun({ ...provider, messages: visionMessages }) })
+      }
+    }
+  }
   if (!hasFiles) {
     for (const provider of OPENAI_COMPAT_PROVIDERS) {
       if (process.env[provider.keyEnv] && !(fastLane && provider.name === 'groq')) {
@@ -1071,6 +1090,9 @@ ${closingLine}`
       await refundQuota()
       // Set DEBUG_ERRORS=true in Vercel to see which providers failed and why.
       const dbg = process.env.DEBUG_ERRORS === 'true' ? ` [${trail.join(', ')}]` : ''
+      if (hasFiles && (sawRateLimit || sawOverload)) {
+        return fail(429, 'RADIUS cannot read photos and files right now because the reader is very busy. Please try again in a little while, or type the question as text.' + dbg)
+      }
       if (sawRateLimit) {
         return fail(429, 'RADIUS is getting a lot of requests right now. Please wait a few seconds and try again.' + dbg)
       }
