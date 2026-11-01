@@ -332,6 +332,7 @@ export function jsonIsDrawing(source) {
 }
 
 // Languages the AI sometimes puts on a drawing block instead of "diagram".
+const CODE_LANGS = new Set(['python', 'py', 'java', 'c', 'cpp', 'c++', 'csharp', 'cs', 'go', 'rust', 'php', 'ruby', 'sql', 'bash', 'sh', 'shell', 'html', 'css', 'xml', 'yaml', 'yml', 'matlab', 'r', 'kotlin', 'swift', 'latex', 'tex', 'markdown', 'md', 'ts', 'typescript', 'tsx', 'jsx', 'scala', 'dart', 'lua', 'perl'])
 const PLAIN_LANGS = new Set(['', 'json', 'jsonc', 'json5', 'javascript', 'js', 'text', 'plaintext', 'txt'])
 const DRAWING_START = /"(type|layout|parts|source|supports|loads|forces|curves|series|functions)"\s*:/
 
@@ -346,7 +347,7 @@ export function diagramComponents(c, print = false) {
   const drawingKind = (lang, raw) => {
     const src = raw.trim()
     if (lang === 'diagram' || lang === 'graph' || lang === 'svg') return lang
-    if (PLAIN_LANGS.has(lang) && src.startsWith('{') && (jsonIsDrawing(src) || (!src.endsWith('}') && DRAWING_START.test(src.slice(0, 300))))) return 'json'
+    if ((PLAIN_LANGS.has(lang) || !CODE_LANGS.has(lang)) && src.startsWith('{') && (jsonIsDrawing(src) || (!src.endsWith('}') && DRAWING_START.test(src.slice(0, 300))))) return 'json'
     return null
   }
   return {

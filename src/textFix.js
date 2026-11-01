@@ -55,6 +55,32 @@ function layoutMath(chunk) {
   return s.replace(/\n{3,}/g, '\n\n')
 }
 
+// A bare \boxed{...} (the AI forgot the $$ around it) becomes its own display equation,
+// one per line, instead of showing as raw code.
+function wrapBareBoxed(chunk) {
+  return chunk.split('\n').map((line) => {
+    if (!line.includes('\\boxed{') || line.includes('$')) return line
+    const out = []
+    let rest = line
+    let i
+    while ((i = rest.indexOf('\\boxed{')) >= 0) {
+      let depth = 0
+      let j = i + 6
+      for (; j < rest.length; j++) {
+        if (rest[j] === '{') depth++
+        else if (rest[j] === '}') { depth--; if (depth === 0) break }
+      }
+      if (depth !== 0) { out.push(rest); rest = ''; break }
+      const before = rest.slice(0, i).trim()
+      if (before) out.push(before)
+      out.push('\n\n$$\n' + rest.slice(i, j + 1) + '\n$$\n\n')
+      rest = rest.slice(j + 1)
+    }
+    if (rest.trim()) out.push(rest.trim())
+    return out.join('\n')
+  }).join('\n')
+}
+
 export function fixMath(text) {
   const src = String(text || '')
   // Never touch code: split it out and put it back unchanged.
@@ -68,7 +94,7 @@ export function fixMath(text) {
         // a whole line, or a few lines, wrapped in bare [ ] that contain LaTeX commands
         .replace(/^[ \t]*\[[ \t]*\n([\s\S]*?\\[a-zA-Z]+[\s\S]*?)\n[ \t]*\][ \t]*$/gm, (m, x) => `\n$$\n${tidyMath(x)}\n$$\n`)
         .replace(/^[ \t]*\[[ \t]*([^\n\]]*\\[a-zA-Z]+[^\n]*?)[ \t]*\][ \t]*$/gm, (m, x) => `\n$$\n${tidyMath(x)}\n$$\n`)
-      return layoutMath(fixTextCommands(fixed))
+      return layoutMath(fixTextCommands(wrapBareBoxed(fixed)))
     })
     .join('')
 }

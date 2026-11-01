@@ -21,6 +21,7 @@ import { parseLoose } from './jsonLoose.js'
 
 const KNOWN = new Set([...DIAGRAM_TYPES, 'miller', 'free_body', 'graph'])
 const PLAIN = new Set(['', 'json', 'jsonc', 'json5', 'javascript', 'js', 'text', 'plaintext', 'txt', 'diagram', 'graph', 'draw', 'drawing'])
+const CODE_LANGS = new Set(['python', 'py', 'java', 'c', 'cpp', 'c++', 'csharp', 'cs', 'go', 'rust', 'php', 'ruby', 'sql', 'bash', 'sh', 'shell', 'html', 'css', 'xml', 'yaml', 'yml', 'matlab', 'r', 'kotlin', 'swift', 'latex', 'tex', 'markdown', 'md', 'ts', 'typescript', 'tsx', 'jsx', 'scala', 'dart', 'lua', 'perl'])
 const KEYS = 'type|layout|parts|source|supports|loads|forces|curves|series|functions'
 const DRAWING_START = new RegExp('["\']?(?:' + KEYS + ')["\']?\\s*:')
 // Same colours the exported image uses; only used to test that a drawing works.
@@ -151,7 +152,9 @@ function replacement(ctx) {
 function processFence(seg, ctx) {
   const keep = [seg.open, ...(seg.bodyLines || []), ...(seg.closed ? [seg.close] : [])].join('\n')
   const lang = seg.lang
-  if (lang === 'svg' || (lang && !PLAIN.has(lang))) return keep
+  // The AI sometimes labels the block with the drawing's own name (```beam, ```circuit...). Any block that
+  // really holds a drawing is drawn; real programming code is left alone.
+  if (lang === 'svg' || CODE_LANGS.has(lang)) return keep
   const raw = seg.bodyLines.join('\n').trim()
   if (!raw.startsWith('{')) return keep
   const r = readRegion(raw, ctx, ctx.final || seg.closed)

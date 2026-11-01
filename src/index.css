@@ -261,6 +261,10 @@ img { max-width: 100%; }
 .radius-markdown .katex-display > .katex { white-space: nowrap; }
 .radius-markdown .katex-error { color: var(--warn); }
 
+@media (max-width: 520px) {
+  .radius-markdown .katex-display > .katex { font-size: 0.92em; }
+}
+
 /* ---- Motion preferences ------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   .fade-in-2, .fade-in-3, .card3d-in { opacity: 1; animation: none; }

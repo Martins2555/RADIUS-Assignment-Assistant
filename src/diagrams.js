@@ -49,8 +49,8 @@ function rich(label, size) {
   return out
 }
 
-function T(x, y, label, { size = 13, anchor = 'middle', weight = 400, fill, italic } = {}) {
-  return `<text x="${r1(x)}" y="${r1(y)}" text-anchor="${anchor}" font-size="${size}" font-weight="${weight}"${italic ? ' font-style="italic"' : ''} fill="${fill}" font-family="${FONT}">${rich(label, size)}</text>`
+function T(x, y, label, { size = 13, anchor = 'middle', weight = 400, fill, italic, halo } = {}) {
+  return `<text x="${r1(x)}" y="${r1(y)}" text-anchor="${anchor}" font-size="${size}" font-weight="${weight}"${italic ? ' font-style="italic"' : ''}${halo ? ` stroke="${halo}" stroke-width="5" stroke-linejoin="round" paint-order="stroke"` : ''} fill="${fill}" font-family="${FONT}">${rich(label, size)}</text>`
 }
 
 function line(x1, y1, x2, y2, stroke, w = 1.5, dash) {
@@ -192,18 +192,18 @@ function miller(spec, p) {
       const A = P(1 / h, 0, 0)
       body += line(A[0], A[1] + 5, A[0], 301, p.sub, 0.8, '3 3')
       body += `<circle cx="${r1(A[0])}" cy="${r1(A[1])}" r="4.5" fill="${p.accent}"/>`
-      body += T(A[0], 316, `x = ${fr(h)}`, { size: 13, weight: 600, fill: p.accent })
+      body += T(A[0], 316, `x = ${fr(h)}`, { size: 13, weight: 600, fill: p.accent, halo: p.bg })
     }
     if (k > 0) {
       const B = P(0, 1 / k, 0)
       body += `<circle cx="${r1(B[0])}" cy="${r1(B[1])}" r="4.5" fill="${p.accent}"/>`
-      body += T(B[0] + 12, B[1] + 26, `y = ${fr(k)}`, { size: 13, weight: 600, fill: p.accent, anchor: 'start' })
+      body += T(B[0] + 12, B[1] + 26, `y = ${fr(k)}`, { size: 13, weight: 600, fill: p.accent, anchor: 'start', halo: p.bg })
     }
     if (l > 0) {
       const C = P(0, 0, 1 / l)
       body += `<circle cx="${r1(C[0])}" cy="${r1(C[1])}" r="4.5" fill="${p.accent}"/>`
       body += line(C[0] - 6, C[1], C[0] - 34, C[1], p.sub, 0.8, '3 3')
-      body += T(C[0] - 38, C[1] + 5, `z = ${fr(l)}`, { size: 13, weight: 600, fill: p.accent, anchor: 'end' })
+      body += T(C[0] - 38, C[1] + 5, `z = ${fr(l)}`, { size: 13, weight: 600, fill: p.accent, anchor: 'end', halo: p.bg })
     }
   }
 
@@ -525,6 +525,7 @@ function lens(spec, p) {
   const f = num(spec.f, 0)
   const u = num(spec.u, 0)
   const h = num(spec.h, 3)
+  const hGiven = spec.h !== undefined && spec.h !== null && spec.h !== ''
   if (!f || !(u > 0)) throw new Error('A lens diagram needs a focal length f and an object distance u > 0.')
   const unit = spec.unit ? String(spec.unit) : 'cm'
   const W = 380
@@ -604,7 +605,7 @@ function lens(spec, p) {
   const m = atFocus ? null : -v / u
   body += T(190, 262, `f = ${fmt(f)} ${unit} (${f > 0 ? 'converging' : 'diverging'})   u = ${fmt(u)} ${unit}`, { size: 13, weight: 600, fill: p.text })
   if (!atFocus) {
-    body += T(190, 282, `v = ${fmt(v)} ${unit}   m = ${fmt(m)}   h\u2032 = ${fmt(hi)} ${unit}`, { size: 13, weight: 600, fill: p.accent })
+    body += T(190, 282, `v = ${fmt(v)} ${unit}   m = ${fmt(m)}${hGiven ? `   h\u2032 = ${fmt(hi)} ${unit}` : ''}`, { size: 13, weight: 600, fill: p.accent })
     const nature = `${real ? 'Real' : 'Virtual'}, ${hi < 0 ? 'inverted' : 'upright'}, ${Math.abs(m) > 1.0001 ? 'magnified' : Math.abs(m) < 0.9999 ? 'diminished' : 'same size'}`
     body += T(190, 302, nature, { size: 12, fill: p.sub })
   }

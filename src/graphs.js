@@ -17,6 +17,10 @@ const FUNCS = {
 }
 const CONSTS = { pi: Math.PI, e: Math.E }
 
+// x^2 -> x\u00B2, x^-1 -> x\u207B\u00B9 (titles and legends read better with real superscripts)
+const SUP = { '0': '\u2070', '1': '\u00B9', '2': '\u00B2', '3': '\u00B3', '4': '\u2074', '5': '\u2075', '6': '\u2076', '7': '\u2077', '8': '\u2078', '9': '\u2079', '-': '\u207B' }
+const prettyPow = (t) => String(t).replace(/\^\(?(-?\d{1,2})\)?/g, (m, d) => [...d].map((c) => SUP[c] || c).join(''))
+
 function tokenize(src, vname) {
   const s = String(src)
     .replace(/[\u2212\u2013\u2014]/g, '-')
@@ -382,7 +386,7 @@ export function renderGraph(spec, p, viewOverride) {
   R.curves.forEach((c, i) => { if (c.label) legend.push({ label: c.label, color: c.color || colors[i % colors.length], dashed: c.dashed, kind: 'line' }) })
   R.series.forEach((s, i) => { if (s.name) legend.push({ label: s.name, color: colors[(R.curves.length + i) % colors.length], kind: 'dot' }) })
   const showLegend = legend.length > 1 || (legend.length === 1 && legend[0].label !== spec.title)
-  const title = spec.title ? String(spec.title) : ''
+  const title = spec.title ? prettyPow(spec.title) : ''
   const headH = (title ? 26 : 10) + (showLegend ? legend.length * 17 + 4 : 0)
   const left = 54
   const right = W - 16
