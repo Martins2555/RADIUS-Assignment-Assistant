@@ -18,7 +18,10 @@ import { LongPressMenu, MessageBubble } from './chat.jsx'
 import { LockModal, NicknamePrompt } from './modals.jsx'
 import { HOURLY_LIMIT, TOOLS, TOOL_INFO, TOOL_PLACEHOLDERS } from './constants.js'
 import { Cube3D, Hero3D } from './visuals.jsx'
+import { LaunchSplash, SignInOverlay } from './motion.jsx'
 import { AuthScreen, LandingScreen, ResetPasswordScreen } from './authScreens.jsx'
+
+const SPLASH_MS = 2600
 
 function Dashboard({ session }) {
   const [view, setView] = useState('main')
@@ -1918,6 +1921,29 @@ function App() {
   const [passwordRecovery, setPasswordRecovery] = useState(false)
   const [showLanding, setShowLanding] = useState(true)
   const [authSignUp, setAuthSignUp] = useState(true)
+  // Sign-in animation: null (off), 'working' (request running), 'success' (check mark).
+  const [signInFx, setSignInFx] = useState(null)
+  const signInFxRef = useRef(null)
+  const setFx = (v) => { signInFxRef.current = v; setSignInFx(v) }
+  // The launch animation sits on top of the app for this long, while the app
+  // loads underneath. Change SPLASH_MS to make it shorter or longer.
+  const [splashDone, setSplashDone] = useState(false)
+  useEffect(() => {
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const id = setTimeout(() => setSplashDone(true), reduce ? 500 : SPLASH_MS)
+    return () => clearTimeout(id)
+  }, [])
+  useEffect(() => {
+    if (signInFx === 'success') {
+      const id = setTimeout(() => setFx(null), 1900)
+      return () => clearTimeout(id)
+    }
+    if (signInFx === 'working') {
+      const id = setTimeout(() => setFx(null), 20000) // safety: never get stuck
+      return () => clearTimeout(id)
+    }
+    return undefined
+  }, [signInFx])
 
   useEffect(() => {
     // Installable app setup. These tags are only added here if index.html
@@ -1946,37 +1972,40 @@ function App() {
       if (event === 'PASSWORD_RECOVERY') {
         setPasswordRecovery(true)
       }
+      // Only a sign-in the user just started plays the check mark. Restoring an
+      // old session on page load does not.
+      if (event === 'SIGNED_IN' && signInFxRef.current === 'working') {
+        setFx('success')
+      }
     })
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  if (checkingSession) {
-    return (
-      <div style={styles.container}>
-        <Hero3D size={200} />
-        <p style={{ color: '#8f98ae', marginTop: '0.4rem', letterSpacing: '0.04em' }}>Starting RADIUS...</p>
-      </div>
-    )
+  let screen = null
+  if (!checkingSession) {
+    if (passwordRecovery) {
+      screen = <ResetPasswordScreen onDone={() => setPasswordRecovery(false)} />
+    } else if (session) {
+      screen = <Dashboard session={session} />
+    } else if (showLanding) {
+      screen = (
+        <LandingScreen
+          onGetStarted={() => { setAuthSignUp(true); setShowLanding(false) }}
+          onSignIn={() => { setAuthSignUp(false); setShowLanding(false) }}
+        />
+      )
+    } else {
+      screen = <AuthScreen initialSignUp={authSignUp} onSignInStart={() => setFx('working')} onSignInFail={() => setFx(null)} />
+    }
   }
 
-  if (passwordRecovery) {
-    return <ResetPasswordScreen onDone={() => setPasswordRecovery(false)} />
-  }
-
-  if (session) {
-    return <Dashboard session={session} />
-  }
-
-  if (showLanding) {
-    return (
-      <LandingScreen
-        onGetStarted={() => { setAuthSignUp(true); setShowLanding(false) }}
-        onSignIn={() => { setAuthSignUp(false); setShowLanding(false) }}
-      />
-    )
-  }
-
-  return <AuthScreen initialSignUp={authSignUp} />
+  return (
+    <>
+      {screen}
+      {(checkingSession || !splashDone) && <LaunchSplash />}
+      {signInFx && <SignInOverlay status={signInFx} />}
+    </>
+  )
 }
 
 export default App

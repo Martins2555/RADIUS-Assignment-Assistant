@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { styles } from './styles.js'
+import { LoaderMark } from './motion.jsx'
 
 const HERO_PARTICLES = [
   { left: '8%', top: '30%', size: 5, delay: '0s' },
@@ -68,20 +69,10 @@ export function Hero3D({ size = 230 }) {
   )
 }
 
-// Small spinning 3D cube, used as the loading indicator.
+// Loading indicator. It used to be a spinning cube; it is now the Voxel Wave
+// (see motion.jsx). The name stays Cube3D so every place that uses it keeps working.
 export function Cube3D({ size = 20 }) {
-  return (
-    <span className="cube3d-wrap" style={{ width: size + 10, height: size + 10, perspective: `${size * 7}px` }}>
-      <span className="cube3d" style={{ '--s': `${size}px` }}>
-        <i className="cf-front" />
-        <i className="cf-back" />
-        <i className="cf-right" />
-        <i className="cf-left" />
-        <i className="cf-top" />
-        <i className="cf-bottom" />
-      </span>
-    </span>
-  )
+  return <LoaderMark size={size} />
 }
 
 export function Logo({ small }) {

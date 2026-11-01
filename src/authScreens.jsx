@@ -6,7 +6,7 @@ import { styles } from './styles.js'
 import { Logo } from './visuals.jsx'
 import { requestCodeUrl, requestCodeWhatsappUrl } from './constants.js'
 
-export function AuthScreen({ initialSignUp = true }) {
+export function AuthScreen({ initialSignUp = true, onSignInStart, onSignInFail }) {
   const [isSignUp, setIsSignUp] = useState(initialSignUp)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -39,8 +39,12 @@ export function AuthScreen({ initialSignUp = true }) {
         setMessage('Check your email to confirm your account.')
       }
     } else {
+      if (onSignInStart) onSignInStart()
       const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) setMessage(error.message)
+      if (error) {
+        setMessage(error.message)
+        if (onSignInFail) onSignInFail()
+      }
     }
     setLoading(false)
   }
