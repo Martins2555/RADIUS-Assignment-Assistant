@@ -76,8 +76,12 @@ function wrapBareEnvs(chunk) {
 // A bare \boxed{...} (the AI forgot the $$ around it) becomes its own display equation,
 // one per line, instead of showing as raw code.
 function wrapBareBoxed(chunk) {
+  let offset = 0
   return chunk.split('\n').map((line) => {
-    if (!line.includes('\\boxed{') || line.includes('$')) return line
+    const start = offset
+    offset += line.length + 1
+    // already wrapped (on this line, or inside a multi-line $$ block): leave it alone
+    if (!line.includes('\\boxed{') || line.includes('$') || insideMath(chunk.slice(0, start))) return line
     const out = []
     let rest = line
     let i
