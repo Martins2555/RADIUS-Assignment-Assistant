@@ -247,7 +247,9 @@ img { max-width: 100%; }
   vertical-align: top;
 }
 .radius-markdown th { background: rgba(128, 138, 160, 0.16); font-weight: 700; }
-.radius-markdown img, .radius-markdown svg { max-width: 100%; height: auto; }
+/* Only photos are resized here. Do NOT add svg: KaTeX draws square roots, vector arrows and big
+   brackets as inline svg and needs its own height, or they disappear. */
+.radius-markdown img { max-width: 100%; height: auto; }
 
 /* Equations: long ones scroll sideways inside the bubble instead of breaking the page */
 .radius-markdown .katex-display {
