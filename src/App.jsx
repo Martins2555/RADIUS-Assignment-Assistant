@@ -17,8 +17,8 @@ import { Sidebar } from './sidebar.jsx'
 import { LongPressMenu, MessageBubble } from './chat.jsx'
 import { LockModal, NicknamePrompt } from './modals.jsx'
 import { HOURLY_LIMIT, TOOLS, TOOL_INFO, TOOL_PLACEHOLDERS } from './constants.js'
-import { Cube3D, Hero3D } from './visuals.jsx'
-import { LaunchSplash, SignInOverlay } from './motion.jsx'
+import { Cube3D } from './visuals.jsx'
+import { GyroHero, LaunchSplash, SignInOverlay } from './motion.jsx'
 import { AuthScreen, LandingScreen, ResetPasswordScreen } from './authScreens.jsx'
 
 const SPLASH_MS = 2600
@@ -1557,7 +1557,7 @@ function Dashboard({ session }) {
         {messages.length === 0 && !loading && (
           <div key={`${activeConversationId || 'new'}-${tool}`} className="radius-entrance" style={{ textAlign: 'center', margin: 'auto', padding: '0 1.2rem', maxWidth: '420px' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.6rem' }}>
-              <Hero3D size={tool === 'chat' ? 150 : 110} />
+              <GyroHero size={tool === 'chat' ? 170 : 120} />
             </div>
             {tool === 'project' ? (
               <ProjectHome

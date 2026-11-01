@@ -173,9 +173,155 @@ export function VoxelWave({ size = 120, mode = 'think', done = false, style }) {
   return <canvas ref={ref} aria-hidden="true" style={{ width: size, height: size, display: 'block', flexShrink: 0, ...style }} />
 }
 
-// Replaces the old spinning cube everywhere it was used.
+// ---- Shared canvas runner for the globe and the gyro cube -------------------
+const mkA = (rgb) => (a, m = 1, w = 0) => {
+  const c = rgb.map((v) => Math.round(Math.min(255, v * m + (255 - v * m) * w)))
+  return `rgba(${c[0]},${c[1]},${c[2]},${clamp(a, 0, 1)})`
+}
+
+function P3(x, y, z, ay, ax) {
+  let c = Math.cos(ay), s = Math.sin(ay)
+  const x1 = x * c + z * s, z1 = -x * s + z * c
+  c = Math.cos(ax); s = Math.sin(ax)
+  const y1 = y * c - z1 * s, z2 = y * s + z1 * c, f = 3.2 / (3.2 + z2)
+  return [x1 * f, y1 * f, z2, f]
+}
+
+function CanvasAnim({ size, draw, style }) {
+  const ref = useRef(null)
+  const drawRef = useRef(draw)
+  drawRef.current = draw
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return undefined
+    const g = cv.getContext('2d')
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
+    cv.width = cv.height = Math.round(size * dpr)
+    const u = 2 / size
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    let rgb = readAccent()
+    let raf = 0
+    let frames = 0
+    const t0 = performance.now()
+    const paint = (t) => {
+      const k = (dpr * size) / 2
+      g.setTransform(1, 0, 0, 1, 0, 0)
+      g.clearRect(0, 0, cv.width, cv.height)
+      g.setTransform(k, 0, 0, k, k, k)
+      g.lineCap = 'round'; g.lineJoin = 'round'
+      drawRef.current(g, t, u, rgb)
+    }
+    if (reduce) { paint(1.6); return undefined }
+    const frame = (now) => {
+      if (frames++ % 40 === 0) rgb = readAccent()
+      paint((now - t0) / 1000)
+      raf = requestAnimationFrame(frame)
+    }
+    raf = requestAnimationFrame(frame)
+    return () => cancelAnimationFrame(raf)
+  }, [size])
+  return <canvas ref={ref} aria-hidden="true" style={{ width: size, height: size, display: 'block', flexShrink: 0, ...style }} />
+}
+
+// ---- Particle Globe: the thinking loader ------------------------------------
+const GLOBES = {}
+function globePoints(n) {
+  if (GLOBES[n]) return GLOBES[n]
+  const pts = []
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (2 * (i + 0.5)) / n
+    const r = Math.sqrt(1 - y * y), th = i * 2.399963
+    pts.push([Math.cos(th) * r, y, Math.sin(th) * r])
+  }
+  GLOBES[n] = pts
+  return pts
+}
+
+function drawGlobe(g, t, u, rgb, pts) {
+  const A = mkA(rgb)
+  const R = 0.74, a = 0.7 * t, ph = 3 * t
+  const grd = g.createRadialGradient(0, 0, 0, 0, 0, 0.9)
+  grd.addColorStop(0, A(0.14, 1, 0.5)); grd.addColorStop(1, A(0))
+  g.fillStyle = grd; g.beginPath(); g.arc(0, 0, 0.9, 0, TAU); g.fill()
+  for (let i = 0; i < pts.length; i++) {
+    const b = pts[i]
+    const wv = Math.sin(b[1] * 6 - ph)
+    const rr = R * (1 + 0.09 * wv)
+    const p = P3(b[0] * rr, b[1] * rr, b[2] * rr, a, -0.35)
+    const dn = clamp((1 - p[2]) / 2, 0, 1), br = 0.5 + 0.5 * wv
+    const r = Math.max(1.0 * u, 0.006 + 0.013 * dn)
+    g.beginPath(); g.arc(p[0], p[1], r, 0, TAU)
+    g.fillStyle = A((0.25 + 0.75 * dn) * (0.45 + 0.55 * br), 1, br * 0.15)
+    g.fill()
+  }
+}
+
+// Replaces the old spinning cube everywhere it was used (chat "Thinking...",
+// "Working on it...", quiz loading).
 export function LoaderMark({ size = 20 }) {
-  return <VoxelWave size={size + 18} mode="think" style={{ verticalAlign: 'middle' }} />
+  const px = size + 20
+  const pts = globePoints(px < 48 ? 110 : 300)
+  return <CanvasAnim size={px} draw={(g, t, u, rgb) => drawGlobe(g, t, u, rgb, pts)} style={{ verticalAlign: 'middle' }} />
+}
+
+// ---- Gyro Cube: the home-screen hero, with the RADIUS logo inside ------------
+const CUBE_V = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]]
+const CUBE_E = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+
+function drawGyro(g, t, u, rgb) {
+  const A = mkA(rgb)
+  const a = 0.5 * t
+  const lw = Math.max(0.013, 1.3 * u)
+  const rk = [easeBack(prog(t, 0.05, 0.75)), easeBack(prog(t, 0.2, 0.9)), easeBack(prog(t, 0.35, 1.05))]
+  const cs = easeBack(prog(t, 0.3, 1.1)), ca = prog(t, 0.3, 0.6)
+  const R = [0.9, 0.76, 0.62]
+  for (let i = 0; i < 3; i++) {
+    if (rk[i] < 0.01) continue
+    const rr = R[i] * rk[i]
+    const ay = a * (0.5 + 0.35 * i) + i * 1.1
+    const ax = a * (0.3 + 0.2 * i) * (i % 2 ? -1 : 1) + 0.9 * i + 0.4
+    let prev = null
+    for (let k = 0; k <= 56; k++) {
+      const ph = (k / 56) * TAU
+      const p = P3(rr * Math.cos(ph), rr * Math.sin(ph), 0, ay, ax)
+      if (prev) {
+        const z = (p[2] + prev[2]) / 2
+        g.beginPath(); g.moveTo(prev[0], prev[1]); g.lineTo(p[0], p[1])
+        g.strokeStyle = A(clamp(0.6 - z * 1.1, 0.08, 1) * (0.85 - 0.15 * i)); g.lineWidth = lw; g.stroke()
+      }
+      prev = p
+    }
+    const bp = P3(rr * Math.cos(a * 1.4 + i * 2), rr * Math.sin(a * 1.4 + i * 2), 0, ay, ax)
+    const gl = g.createRadialGradient(bp[0], bp[1], 0, bp[0], bp[1], 0.07)
+    gl.addColorStop(0, A(0.7, 1, 0.75)); gl.addColorStop(1, A(0))
+    g.fillStyle = gl; g.beginPath(); g.arc(bp[0], bp[1], 0.07, 0, TAU); g.fill()
+    g.beginPath(); g.arc(bp[0], bp[1], 0.017, 0, TAU); g.fillStyle = '#fff'; g.fill()
+  }
+  if (ca > 0) {
+    const e = 0.34 * cs
+    const pr3 = CUBE_V.map((v) => P3(v[0] * e, v[1] * e, v[2] * e, a * 0.6, a * 0.35 + 0.5))
+    CUBE_E.forEach((ed) => {
+      const p = pr3[ed[0]], q = pr3[ed[1]], z = (p[2] + q[2]) / 2
+      g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1])
+      g.strokeStyle = A(ca * clamp(0.65 - z * 1.2, 0.2, 1), 1, 0.1); g.lineWidth = lw; g.stroke()
+    })
+  }
+}
+
+// The logo sits under the canvas, so the cube edges and rings pass in front of it.
+export function GyroHero({ size = 150 }) {
+  const logo = Math.round(size * 0.36)
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <div style={{ position: 'absolute', inset: '14%', borderRadius: '50%', background: 'radial-gradient(circle, var(--accent-soft) 0%, transparent 68%)', filter: 'blur(10px)' }} />
+      <img
+        src="/logo.png"
+        alt="RADIUS"
+        style={{ position: 'absolute', left: '50%', top: '50%', width: logo, height: logo, marginLeft: -logo / 2, marginTop: -logo / 2, borderRadius: Math.round(logo * 0.22), objectFit: 'cover', boxShadow: '0 0 18px var(--accent-soft)', animation: 'vw-fade 0.6s ease 0.5s both' }}
+      />
+      <CanvasAnim size={size} draw={drawGyro} style={{ position: 'absolute', inset: 0 }} />
+    </div>
+  )
 }
 
 // Shown when RADIUS first opens in the browser. It sits on top of the app, so
