@@ -404,6 +404,15 @@ export default async function handler(req, res) {
   let firstTokenAt = 0
   let logged = false
   let wasPartial = false
+  // Timing split: prep_ms = our own work before the first model call (search, checks, prompt building),
+  // model_wait_ms = how long the model that answered took to send its first piece.
+  let firstAttemptAt = 0
+  let attemptStartAt = 0
+  let chunkAt = 0
+  const timingFields = () => ({
+    prep_ms: firstAttemptAt ? firstAttemptAt - t0 : null,
+    model_wait_ms: chunkAt && attemptStartAt ? chunkAt - attemptStartAt : null,
+  })
   const trail = []
   let logCtx = {}
   // Auth check and rate-limit check are independent, so they run at the same
@@ -825,6 +834,7 @@ ${closingLine}`
       }
     )
     const data = await response.json().catch(() => null)
+    chunkAt = Date.now()
     if (!response.ok) {
       return { ok: false, status: response.status, detail: data?.error?.message }
     }
@@ -991,6 +1001,7 @@ ${closingLine}`
       if (!payload || payload === '[DONE]') return
       let json
       try { json = JSON.parse(payload) } catch (e) { return }
+      if (!chunkAt) chunkAt = Date.now()
       const fr = json?.candidates?.[0]?.finishReason
       if (fr) finishReason = fr
       const um = json?.usageMetadata
@@ -1055,6 +1066,7 @@ ${closingLine}`
         if (!payload || payload === '[DONE]') return
         let json
         try { json = JSON.parse(payload) } catch (e) { return }
+        if (!chunkAt) chunkAt = Date.now()
         const choice = json?.choices?.[0]
         if (choice?.finish_reason) finishReason = choice.finish_reason
         const piece = choice?.delta?.content
@@ -1100,6 +1112,7 @@ ${closingLine}`
       signal: AbortSignal.timeout(20000),
     })
     const data = await response.json().catch(() => null)
+    chunkAt = Date.now()
     if (!response.ok) {
       return { ok: false, status: response.status, detail: data?.error?.message }
     }
@@ -1161,6 +1174,9 @@ ${closingLine}`
             needsReset = false
             carry = ''
           }
+          attemptStartAt = Date.now()
+          if (!firstAttemptAt) firstAttemptAt = attemptStartAt
+          chunkAt = 0
           result = await attempt.run()
         } catch (e) {
           console.error(`Provider ${attempt.label} threw:`, e?.message)
@@ -1202,6 +1218,7 @@ ${closingLine}`
         status: 'failed',
         error_status: sawRateLimit ? 429 : sawOverload ? 503 : 500,
         attempts: trail.join(', ').slice(0, 400),
+        ...timingFields(),
       })
       if (hasFiles && (sawRateLimit || sawOverload)) {
         return fail(429, 'RADIUS cannot read photos and files right now because the reader is very busy. Please try again in a little while, or type the question as text.' + dbg)
@@ -1386,6 +1403,7 @@ ${closingLine}`
       thinking_tokens: usage ? usage.thoughtsTokenCount ?? null : null,
       cached_tokens: usage ? usage.cachedContentTokenCount ?? null : null,
       arithmetic_flags: arithmeticFlags,
+      ...timingFields(),
     })
 
     if (wantStream) {
