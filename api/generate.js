@@ -440,7 +440,7 @@ export default async function handler(req, res) {
   }
   if (authVia === 'token') console.error('Auth server check failed, accepted a valid signed token instead:', authError?.message, authError?.status)
 
-  // Saves one row about this request. Never throws, never waits more than 1.5s,
+  // Saves one row about this request. Never throws, never waits more than 0.8s,
   // and does nothing harmful if the table has not been created yet.
   async function logRequest(fields) {
     if (logged) return
@@ -457,7 +457,7 @@ export default async function handler(req, res) {
       }
       const result = await Promise.race([
         Promise.resolve(supabaseAsUser.from('request_logs').insert(row)),
-        new Promise((resolve) => setTimeout(() => resolve({ error: { message: 'timed out' } }), 1500)),
+        new Promise((resolve) => setTimeout(() => resolve({ error: { message: 'timed out' } }), 800)),
       ])
       if (result && result.error) console.error('Request log failed:', result.error.message)
     } catch (e) {
@@ -1180,6 +1180,8 @@ ${closingLine}`
           result = await attempt.run()
         } catch (e) {
           console.error(`Provider ${attempt.label} threw:`, e?.message)
+          const ranFor = ((Date.now() - attemptStartAt) / 1000).toFixed(1)
+          trail.push(`${attempt.label.replace('gemini:gemini-', 'g')}=${e?.name === 'AbortError' || /abort/i.test(e?.message || '') ? 'silent' : 'error'} ${ranFor}s`)
           break
         }
         if (result.ok) {
@@ -1409,16 +1411,16 @@ ${closingLine}`
     if (wantStream) {
       // The final event carries the fully cleaned text (tag stripped, study
       // cards attached) and replaces whatever was streamed so far.
+      await logRequest(successFields())
       emit({ t: 'done', result: text, responseType })
       res.end()
-      await logRequest(successFields())
       // The answer is already on the student's screen; the notification is
       // sent afterwards so it never delays the reply.
       if (pendingPush) await pendingPush()
       return
     }
-    res.status(200).json({ result: text, responseType })
     await logRequest(successFields())
+    res.status(200).json({ result: text, responseType })
     if (pendingPush) await pendingPush()
     return
   } catch (err) {
