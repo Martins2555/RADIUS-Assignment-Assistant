@@ -63,6 +63,60 @@ DIAGRAM block (language "diagram"), pick the "type" that fits:
 
 ${GRAPH_SPEC_HELP}`
 
+// ---------------------------------------------------------------------------
+// Speed: send less text to the model.
+// 1) The diagram and graph rules are long (several thousand characters). They are
+//    only added when the question could need a drawing.
+// 2) Only the last HISTORY_TURNS messages are sent, and older long replies are
+//    shortened. Change HISTORY_TURNS in Vercel to keep more or less.
+// ---------------------------------------------------------------------------
+const HISTORY_TURNS = Math.max(2, Number(process.env.HISTORY_TURNS) || 10)
+const OLD_REPLY_CHARS = Math.max(400, Number(process.env.OLD_REPLY_CHARS) || 1500)
+
+// Words that clearly ask for a picture (used in every mode).
+const DIAGRAM_ASK = /\b(draw|drawing|sketch|diagram|plot|graph|illustrat\w*|visuali[sz]e|depict|schematic|figure|label(?:led)?)\b|unit cell|show me/i
+// Engineering and physics topics where a drawing usually helps (used for calculative questions).
+const DIAGRAM_TOPIC = /\b(miller|crystal|lattice|plane|beam|cantilever|support|reaction|udl|truss|shear|bending|moment|free[\s-]?body|fbd|forces?|incline|pulley|friction|circuit|resistors?|capacitors?|inductors?|battery|series|parallel|lens|focal|mirror|rays?|optics)\b/i
+
+function needsDiagramRules({ question, history, tool, mode, hasAttachments }) {
+  if (tool === 'graph') return false // Graph mode carries its own copy of the graph rules
+  if (!['chat', 'project', 'pastq', 'notes'].includes(tool)) return false
+  const recent = (Array.isArray(history) ? history.slice(-4) : []).map((t) => (t && typeof t.content === 'string' ? t.content : '')).join(' ')
+  const text = `${question || ''} ${recent}`
+  if (DIAGRAM_ASK.test(question || '')) return true
+  // A follow-up to a conversation that already has a drawing in it ("now make the load 30 kN").
+  if (/\[Diagram shown/i.test(recent)) return true
+  if (mode === 'calculative') {
+    if (hasAttachments) return true // a photo of a problem: the question text is empty, so look at the mode
+    if (DIAGRAM_TOPIC.test(text)) return true
+  }
+  return false
+}
+
+function shortenOld(text) {
+  if (text.length <= OLD_REPLY_CHARS) return text
+  const cut = text.slice(0, OLD_REPLY_CHARS)
+  const para = cut.lastIndexOf('\n\n')
+  return (para > OLD_REPLY_CHARS * 0.5 ? cut.slice(0, para) : cut).trimEnd() + '\n\n[earlier reply shortened]'
+}
+
+// The last two messages are always sent in full (a hint, a summary or a regenerate
+// works on them). Older ones lose hidden app markers and drawings, and long old
+// replies are cut short.
+function trimHistory(history) {
+  if (!Array.isArray(history)) return []
+  const clean = history.filter((t) => t && typeof t.content === 'string' && t.content.trim() && (t.role === 'user' || t.role === 'assistant'))
+  let kept = clean.slice(-HISTORY_TURNS)
+  while (kept.length && kept[0].role !== 'user') kept = kept.slice(1)
+  const n = kept.length
+  return kept.map((t, i) => {
+    if (i >= n - 2) return t
+    let c = t.content.replace(/<!--[\s\S]*?-->/g, '').replace(/```(?:diagram|graph|svg)[\s\S]*?```/g, '[Diagram shown to the student]').trim()
+    if (t.role === 'assistant') c = shortenOld(c)
+    return { role: t.role, content: c || t.content }
+  })
+}
+
 // Last resort for a drawing the student asked for but did not get. Asks the
 // model for ONLY the drawing spec in JSON mode (the reply is guaranteed to be
 // JSON), checks it by really drawing it, and returns it or null. Never throws.
@@ -343,6 +397,15 @@ export default async function handler(req, res) {
   }
 
   const requestStartedAt = new Date(Date.now() - 1500).toISOString()
+  // Request logging (see radius_request_logs.sql). Only numbers and short labels
+  // are saved, never what the student typed or what RADIUS answered.
+  const t0 = Date.now()
+  let usage = null // token counts reported by Gemini
+  let firstTokenAt = 0
+  let logged = false
+  let wasPartial = false
+  const trail = []
+  let logCtx = {}
   // Auth check and rate-limit check are independent, so they run at the same
   // time instead of one after the other (saves a full database round trip).
   const supabaseAsUser = createClient(
@@ -367,6 +430,31 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Invalid or expired session' + dbg })
   }
   if (authVia === 'token') console.error('Auth server check failed, accepted a valid signed token instead:', authError?.message, authError?.status)
+
+  // Saves one row about this request. Never throws, never waits more than 1.5s,
+  // and does nothing harmful if the table has not been created yet.
+  async function logRequest(fields) {
+    if (logged) return
+    logged = true
+    try {
+      const body = req.body || {}
+      const row = {
+        user_id: authedUser.id,
+        tool: typeof body.tool === 'string' ? body.tool.slice(0, 20) : null,
+        mode: typeof body.mode === 'string' ? body.mode.slice(0, 20) : null,
+        latency_ms: Date.now() - t0,
+        ...logCtx,
+        ...fields,
+      }
+      const result = await Promise.race([
+        Promise.resolve(supabaseAsUser.from('request_logs').insert(row)),
+        new Promise((resolve) => setTimeout(() => resolve({ error: { message: 'timed out' } }), 1500)),
+      ])
+      if (result && result.error) console.error('Request log failed:', result.error.message)
+    } catch (e) {
+      console.error('Request log threw:', e?.message)
+    }
+  }
 
   // Per-user rate limit: 20 requests/hour, enforced atomically in Postgres via
   // the check_rate_limit() function (see the SQL migration for it). Scoped
@@ -401,6 +489,7 @@ export default async function handler(req, res) {
   if (rateLimitError) {
     console.error('Rate limit check errored (failing open):', rateLimitError.message)
   } else if (rateLimitOk === false) {
+    await logRequest({ status: 'rate_limited', error_status: 429 })
     return res.status(429).json({ error: "You've hit the hourly limit for assignment requests. Please wait a bit and try again." })
   }
 
@@ -414,6 +503,7 @@ export default async function handler(req, res) {
       console.error('Access check errored (failing open):', accessError.message)
     } else if (access && access.allowed === false) {
       await refundQuota()
+      await logRequest({ status: 'locked', error_status: 402 })
       return res.status(402).json({
         error: "You've used your free messages for today. Enter an unlock code, or request one, to keep chatting.",
         code: 'LOCKED',
@@ -518,7 +608,9 @@ export default async function handler(req, res) {
   const actionLine = actionInstruction(action)
 
   // Diagram rules go wherever a drawing could help. Graph mode already carries its own copy of the graph rules.
-  const diagramBlock = ['chat', 'project', 'pastq', 'notes'].includes(effTool) ? DIAGRAM_RULES : ''
+  const diagramProbe = [rawAssignmentText || '', lastUserTurn ? lastUserTurn.content : ''].join(' ')
+  const diagramOn = needsDiagramRules({ question: diagramProbe, history, tool: effTool, mode, hasAttachments: imageList.length > 0 })
+  const diagramBlock = diagramOn ? DIAGRAM_RULES : ''
 
   // Prompt order matters for speed: Gemini re-uses the start of a prompt that is identical
   // to a recent one, so the fixed rules come first and the lines that change per student or
@@ -573,13 +665,12 @@ ${closingLine}`
 
   const contents = []
 
-  if (Array.isArray(history)) {
-    for (const turn of history) {
-      contents.push({
-        role: turn.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: turn.content }],
-      })
-    }
+  const sentHistory = trimHistory(history)
+  for (const turn of sentHistory) {
+    contents.push({
+      role: turn.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: turn.content }],
+    })
   }
 
   // ---- Optional live web search (see top of file) ----
@@ -632,6 +723,18 @@ ${closingLine}`
   if (assignmentText) currentParts.unshift({ text: assignmentText + searchBlock })
   currentParts.push(...fetchedParts.filter(Boolean))
   contents.push({ role: 'user', parts: currentParts })
+  logCtx = {
+    subject: typeof subject === 'string' ? subject.slice(0, 40) : null,
+    action_kind: action ? String(action.kind).slice(0, 20) : null,
+    has_files: imageList.length > 0,
+    file_count: imageList.length,
+    searched: searchResults.length > 0,
+    history_in: Array.isArray(history) ? history.length : 0,
+    history_sent: sentHistory.length,
+    diagram_rules: diagramOn,
+    prompt_chars: systemInstruction.length + contents.reduce((n, c) => n + c.parts.reduce((m, p) => m + (p.text ? p.text.length : 0), 0), 0),
+    streamed: wantStream,
+  }
 
   // ---- Resilience state -------------------------------------------------
   // If a reply breaks off part-way (Gemini overloaded, dropped stream, token
@@ -711,6 +814,7 @@ ${closingLine}`
   const visionMessages = hasFiles ? buildVisionMessages(chatMessages, contents) : null
 
   async function tryGemini(model) {
+    usage = null
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
       {
@@ -724,6 +828,7 @@ ${closingLine}`
     if (!response.ok) {
       return { ok: false, status: response.status, detail: data?.error?.message }
     }
+    if (data?.usageMetadata) usage = data.usageMetadata
     const parts = data?.candidates?.[0]?.content?.parts || []
     const text = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
     return text ? { ok: true, text } : { ok: false, status: 502, detail: 'empty reply' }
@@ -744,6 +849,7 @@ ${closingLine}`
   }
 
   function emit(obj) {
+    if (obj && obj.t === 'delta' && !firstTokenAt) firstTokenAt = Date.now()
     startStream()
     res.write(JSON.stringify(obj) + '\n')
   }
@@ -840,6 +946,7 @@ ${closingLine}`
   }
 
   async function tryGeminiStream(model) {
+    usage = null
     prepareCarry()
     // Give up on a model that stays silent for FIRST_TOKEN_MS, and on one that
     // goes quiet for IDLE_MS part-way through. A long answer is fine as long as
@@ -887,6 +994,7 @@ ${closingLine}`
       const fr = json?.candidates?.[0]?.finishReason
       if (fr) finishReason = fr
       const um = json?.usageMetadata
+      if (um) usage = um
       if (um && um.cachedContentTokenCount != null) console.log(`Prompt cache: ${um.cachedContentTokenCount} of ${um.promptTokenCount} tokens re-used`)
       const parts = json?.candidates?.[0]?.content?.parts || []
       const piece = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
@@ -1041,7 +1149,6 @@ ${closingLine}`
     let text = null
     let sawRateLimit = false
     let sawOverload = false
-    const trail = []
 
     for (const attempt of attempts) {
       if (DEADLINE - Date.now() < 5000) { trail.push('out of time'); break }
@@ -1082,6 +1189,7 @@ ${closingLine}`
     if (text === null && (bestPartial || carry)) {
       // Every attempt was cut off. A partial answer beats an error, but say so.
       if (carry.length > bestPartial.length) bestPartial = carry
+      wasPartial = true
       text = closeOpenSyntax(bestPartial.trimEnd()) + '\n\n_This reply was cut off. Tap Regenerate to get the full answer._'
       console.error('Serving partial reply after all attempts were incomplete, chars:', bestPartial.length)
     }
@@ -1090,6 +1198,11 @@ ${closingLine}`
       await refundQuota()
       // Set DEBUG_ERRORS=true in Vercel to see which providers failed and why.
       const dbg = process.env.DEBUG_ERRORS === 'true' ? ` [${trail.join(', ')}]` : ''
+      await logRequest({
+        status: 'failed',
+        error_status: sawRateLimit ? 429 : sawOverload ? 503 : 500,
+        attempts: trail.join(', ').slice(0, 400),
+      })
       if (hasFiles && (sawRateLimit || sawOverload)) {
         return fail(429, 'RADIUS cannot read photos and files right now because the reader is very busy. Please try again in a little while, or type the question as text.' + dbg)
       }
@@ -1134,9 +1247,11 @@ ${closingLine}`
 
     // Re-add the plain number lines of a worked solution (code only, no AI call). If one does not
     // add up, say so in one short line instead of leaving a wrong number unflagged.
+    let arithmeticFlags = 0
     if (['chat', 'pastq', 'project'].includes(effTool)) {
       try {
         const slips = auditArithmetic(text)
+        arithmeticFlags = slips.length
         if (slips.length) {
           text += arithmeticNote(slips)
           console.log(`Arithmetic check flagged ${slips.length} line(s): ${slips[0].line}`)
@@ -1260,21 +1375,37 @@ ${closingLine}`
       }
     }
 
+    const successFields = () => ({
+      status: wasPartial ? 'partial' : 'ok',
+      provider: servedBy || null,
+      attempts: trail.length ? trail.join(', ').slice(0, 400) : null,
+      reply_chars: text.length,
+      first_token_ms: firstTokenAt ? firstTokenAt - t0 : null,
+      input_tokens: usage ? usage.promptTokenCount ?? null : null,
+      output_tokens: usage ? usage.candidatesTokenCount ?? null : null,
+      thinking_tokens: usage ? usage.thoughtsTokenCount ?? null : null,
+      cached_tokens: usage ? usage.cachedContentTokenCount ?? null : null,
+      arithmetic_flags: arithmeticFlags,
+    })
+
     if (wantStream) {
       // The final event carries the fully cleaned text (tag stripped, study
       // cards attached) and replaces whatever was streamed so far.
       emit({ t: 'done', result: text, responseType })
       res.end()
+      await logRequest(successFields())
       // The answer is already on the student's screen; the notification is
       // sent afterwards so it never delays the reply.
       if (pendingPush) await pendingPush()
       return
     }
     res.status(200).json({ result: text, responseType })
+    await logRequest(successFields())
     if (pendingPush) await pendingPush()
     return
   } catch (err) {
     console.error('generate.js error:', err)
+    await logRequest({ status: 'failed', error_status: 500, attempts: ('exception: ' + (err?.message || '')).slice(0, 400) })
     return fail(500, "Something went wrong on RADIUS's end. Please try again.")
   }
 }
