@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { sendPushToUser } from './_push.js'
 import { finalizeDrawings, drawingBlock, checkSpec } from '../src/drawingExtract.js'
 import { parseLoose } from '../src/jsonLoose.js'
+import { checkGraph } from '../src/graphCheck.js'
 import { getUserFromToken } from './_auth.js'
 import { verifiedFacts, auditArithmetic, arithmeticNote } from './_mathGuard.js'
 import { buildVisionMessages } from './_vision.js'
@@ -48,8 +49,13 @@ const VALID_ACTIONS = ['regen', 'explain', 'hint', 'quiz', 'summary', 'solution'
 // Diagrams and graphs. The model only writes a small JSON spec inside a fenced
 // block; the app draws it exactly (see src/diagrams.js and src/graphs.js).
 // ---------------------------------------------------------------------------
-const GRAPH_SPEC_HELP = `GRAPH block (language "graph"): {"title":"y = x^2 - 4x + 3","xlabel":"x","ylabel":"y","xmin":-2,"xmax":6,"ymin":-2,"ymax":8,"curves":[{"expr":"x^2 - 4*x + 3","label":"y = x^2 - 4x + 3"}],"series":[{"name":"Data","points":[[0,1],[1,3]],"line":true}],"points":[{"x":1,"y":2,"label":"A"}],"vlines":[{"x":2,"label":"x = 2"}],"hlines":[{"y":1,"label":"y = 1"}]}
-Graph rules: every field except "curves", "series" or "points" is optional. In "expr" use only x, numbers, + - * / ^, brackets, the functions sin cos tan asin acos atan sinh cosh tanh sqrt abs ln log exp, and the constants pi and e (angles in radians). Write each equation solved for y. For a circle or other curve that cannot be solved for y, use a parametric curve: {"param":{"x":"3*cos(t)","y":"3*sin(t)","t":[0,6.2832]},"label":"x^2 + y^2 = 9"}. Always set xmin and xmax (and ymin and ymax when you know sensible values) so the interesting part of the graph is visible. Use "dashed":true on a curve for a second or comparison curve. Intercepts and turning points are marked automatically, so do not add them as points.`
+const GRAPH_SPEC_HELP = `GRAPH block (language \"graph\"): {\"title\":\"Stress-strain curves\",\"xlabel\":\"Strain\",\"ylabel\":\"Stress (MPa)\",\"xmin\":0,\"xmax\":0.3,\"ymin\":0,\"ymax\":700,\"series\":[{\"name\":\"Engineering\",\"points\":[[0,0],[0.0004,81.5],[0.3,448.2]],\"line\":true,\"markers\":true},{\"name\":\"True\",\"points\":[[0,0],[0.0004,81.5]],\"line\":true,\"dashed\":true,\"color\":\"red\"}],\"points\":[{\"series\":\"Engineering\",\"at\":\"max\",\"label\":\"UTS = {y} MPa\"},{\"series\":\"Engineering\",\"at\":\"last\",\"label\":\"Fracture\"}],\"expect\":[\"engineering curve\",\"true curve\",\"UTS\",\"fracture\"]}
+Every field except \"curves\", \"series\" or \"points\" is optional. Fields the app does not know are rejected, so use only the ones listed here.
+Data series (the student's own data): \"series\":[{\"name\":...,\"points\":[[x,y],...],\"line\":true to join the points,\"dashed\":true for a dashed line,\"color\":\"green\"|\"blue\"|\"red\"|\"amber\"|\"purple\"|\"#hex\",\"markers\":false to hide the dots}]. Give every series its own name. Use exactly the student's numbers (converted correctly) and never invent data. Draw EVERY curve and line the student asks for. When the student gives an axis range, use it for xmin, xmax, ymin, ymax and give that plot only the data inside the range.
+Marked points: a point that lies ON a series (a peak, an end point, a yield point) is never typed as coordinates. Write {\"series\":\"name\",\"at\":\"max\"} (or \"min\", \"first\", \"last\"), or {\"series\":\"name\",\"at\":\"x\",\"x\":0.002}. Put {x} and {y} in the label and the app prints the real values. Only a point that is on no series may use \"x\" and \"y\".
+Reference lines: \"lines\":[...]. A least squares line through part of a series: {\"label\":\"Elastic line, E = {slope/1000} GPa\",\"fit\":{\"series\":\"Engineering\",\"x\":[0,0.0016]},\"x\":[0,0.0045]} (the app works out the slope; {slope} in the label prints it). A line parallel to an earlier line: {\"label\":\"0.2% offset line\",\"parallelTo\":\"Elastic line\",\"from\":[0.002,0],\"x\":[0.002,0.008],\"dashed\":true}. Or {\"from\":[x,y],\"slope\":m,\"x\":[a,b]} or {\"from\":[x,y],\"to\":[x,y]}. The point where a line meets a series: {\"at\":\"intersect\",\"series\":\"Engineering\",\"line\":\"0.2% offset line\",\"label\":\"Proof stress {y} MPa\"}.
+\"expect\": a list of short names for everything the student asked to see (each curve, each line, each labelled point). The app checks that each one really is in the graph. \"xstep\" and \"ystep\" set the grid spacing.
+Equations: \"curves\":[{\"expr\":\"x^2 - 4*x + 3\",\"label\":\"y = x^2 - 4x + 3\",\"dashed\":true}]. In \"expr\" use only x, numbers, + - * / ^, brackets, the functions sin cos tan asin acos atan sinh cosh tanh sqrt abs ln log exp, and the constants pi and e (angles in radians). Write each equation solved for y. For a circle or other curve that cannot be solved for y, use a parametric curve: {\"param\":{\"x\":\"3*cos(t)\",\"y\":\"3*sin(t)\",\"t\":[0,6.2832]},\"label\":\"x^2 + y^2 = 9\"}. Always set xmin and xmax (and ymin and ymax when you know sensible values) so the interesting part of the graph is visible. Use \"dashed\":true on a second or comparison curve. Also available: \"vlines\":[{\"x\":2,\"label\":\"x = 2\"}], \"hlines\":[{\"y\":1,\"label\":\"y = 1\"}], \"points\":[{\"x\":1,\"y\":2,\"label\":\"A\"}]. Intercepts and turning points of equations are marked automatically, so do not add them as points.`
 
 const DIAGRAM_RULES = `DIAGRAMS AND GRAPHS: The app draws accurate diagrams and graphs from a JSON spec. When the student asks to show, draw, sketch, illustrate, plot or represent something, or when a diagram would clearly help (crystal planes and unit cells, forces, beams, circuits, lenses, graphs of functions), put exactly ONE fenced code block in your reply. Use the language "diagram" for diagrams and "graph" for graphs. The block must be written with the fence lines on their own lines: a line containing only \`\`\`diagram (or \`\`\`graph), then the JSON, then a line containing only \`\`\`. Always label the code fence exactly diagram (or graph), never beam, circuit, lens or any other name. Never show the JSON without the fence, never put it in single backticks, and never write the word diagram or graph in front of it on the same line. The drawing must use exactly the same numbers as your answer. Never draw ASCII or text art, never use box-drawing characters, and never output image links. Write the working and explanation as normal text; the drawing does not replace it. Put the block after the explanation unless the student only asked for a drawing. Introduce it in a few words ("Here is the diagram:") and never mention JSON, specs, or code to the student. The JSON must be valid: double quotes, no comments, no trailing commas, and written on ONE single line (do not pretty-print or indent it). Leave a blank line before and after the block. Do not put any other text inside the block.
 
@@ -149,6 +155,77 @@ async function aiDrawingSpec({ question, reply }) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Graph quality gate. Every ```graph block is checked by src/graphCheck.js:
+// safe problems are fixed in code (labels moved onto their real points ...),
+// and when something is still wrong the model gets ONE focused retry.
+// ---------------------------------------------------------------------------
+const GRAPH_FENCE = /```graph[^\n]*\n([\s\S]*?)```/g
+
+function reviewGraphs(text, question) {
+  const re = new RegExp(GRAPH_FENCE.source, 'g')
+  const items = []
+  let out = ''
+  let last = 0
+  let m
+  while ((m = re.exec(text))) {
+    out += text.slice(last, m.index)
+    last = m.index + m[0].length
+    let spec = null
+    try { spec = parseLoose(m[1]) } catch (e) { spec = null }
+    if (!spec || typeof spec !== 'object') { out += m[0]; items.push({ skipped: true, problems: [] }); continue }
+    const r = checkGraph(spec, { question })
+    out += '```graph\n' + JSON.stringify(r.spec) + '\n```'
+    items.push({ spec: r.spec, problems: r.problems, fixes: r.fixes })
+  }
+  return { text: out + text.slice(last), items }
+}
+
+function replaceGraphs(text, specs) {
+  let i = 0
+  return text.replace(new RegExp(GRAPH_FENCE.source, 'g'), (whole) => {
+    const spec = specs[i++]
+    return spec ? '```graph\n' + JSON.stringify(spec) + '\n```' : whole
+  })
+}
+
+async function aiGraphFix({ models, question, items, deadline }) {
+  try {
+    const key = process.env.GEMINI_API_KEY
+    if (!key || !Array.isArray(models) || !models.length) return null
+    const listing = items.map((it, i) => `GRAPH ${i + 1}${it.problems.length ? ' (HAS PROBLEMS)' : ' (OK, return it unchanged)'}:\n${JSON.stringify(it.spec)}${it.problems.length ? '\nPROBLEMS:\n- ' + it.problems.join('\n- ') : ''}`).join('\n\n')
+    const prompt = `${GRAPH_SPEC_HELP}\n\nIGNORE the instructions above about code fences and about writing text. Your whole reply must be ONE raw JSON object {"graphs":[...]} holding the corrected spec of EVERY graph below, in the same order. Keep everything that is already right and fix only the listed problems. Use exactly the numbers already in the specs and in the question; never invent data.\n\nSTUDENT'S QUESTION:\n${String(question || '').slice(0, 3500)}\n\n${listing}`
+    for (const model of models.slice(0, 2)) {
+      const left = deadline - Date.now() - 2500
+      if (left < 5000) break
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 6000, thinkingConfig: { thinkingLevel: 'low' } },
+          }),
+          signal: AbortSignal.timeout(Math.min(14000, left)),
+        })
+        const data = await response.json().catch(() => null)
+        if (!response.ok) { console.error('Graph fix failed:', model, response.status); continue }
+        const raw = (data?.candidates?.[0]?.content?.parts || []).filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
+        const parsed = parseLoose(raw)
+        const graphs = Array.isArray(parsed) ? parsed : parsed && parsed.graphs
+        if (!Array.isArray(graphs) || graphs.length !== items.length) { console.error('Graph fix returned the wrong shape'); continue }
+        return graphs.map((g) => (g && typeof g === 'object' ? checkGraph(g, { question }) : null))
+      } catch (e) {
+        console.error('Graph fix error:', model, e?.message)
+      }
+    }
+    return null
+  } catch (e) {
+    console.error('Graph fix error:', e?.message)
+    return null
+  }
+}
+
 // A reply that breaks off can stop in the middle of a formula or code block.
 // Close it so the note after it is not swallowed (and painted as a maths error).
 function closeOpenSyntax(t) {
@@ -182,7 +259,7 @@ First message with questions: reply with
 Then ask the student to reply with their answers.
 When the student replies with answers: mark each one, briefly explain mistakes, then give "## Weak Topics" ranked with what to study next. Remember results across the conversation so weak topics build up over rounds. Use [TYPE:ASSIGNMENT] for the tag.`
     case 'graph':
-      return `TOOL: GRAPH MODE. The student wants something plotted: an equation, several equations, a function from their coursework, or data points they give you (typed, pasted, or in a photo). Reply with one or two short lines saying what is plotted and its key features (shape, intercepts, turning points, asymptotes, domain), then exactly ONE \`\`\`graph block, then nothing else. Plot exactly what was asked and nothing extra. If the student gives data, use "series" (with "line":true when the points should be joined) and set "xlabel" and "ylabel" with units. If the request is unclear, make a sensible assumption, state it in one line, and plot anyway. If it is not something that can be plotted, say so in one line instead of a block. Use [TYPE:GENERAL] for the tag.\n\n${GRAPH_SPEC_HELP}`
+      return `TOOL: GRAPH MODE. The student wants something plotted: an equation, several equations, a function from their coursework, or data points they give you (typed, pasted, or in a photo). If the student asks for several plots (for example a full view and a zoomed view), write one \`\`\`graph block per plot, in the order asked, at most 3, each a complete spec. If they also ask for calculated values (a modulus, a yield stress, a percentage...), first give them as a short list with units, each worked out from the data they gave and shown on one line; then the block(s). Otherwise reply with one or two short lines saying what is plotted and its key features (shape, intercepts, turning points, asymptotes, domain), then the block. Do not describe line styles, colours or labels in the text: the app adds a caption built from the drawing. Plot exactly what was asked and nothing extra, and never leave out a curve, line or point that was asked for. If the student gives data, use \"series\" (with \"line\":true when the points should be joined) and set \"xlabel\" and \"ylabel\" with units. If the request is unclear, make a sensible assumption, state it in one line, and plot anyway. If it is not something that can be plotted, say so in one line instead of a block. Write nothing after the last block. Use [TYPE:GENERAL] for the tag.\n\n${GRAPH_SPEC_HELP}`
     case 'cite':
       return `TOOL: CITATION FIXER. The student gives a source (URL, title, DOI, or raw details). Format it in the requested style (APA 7, Harvard, IEEE, MLA or Chicago). If no style is given, use APA 7 and say so in one short line. Give the reference list entry, then the in-text citation. NEVER invent authors, years, titles, publishers, or page numbers. If a detail is missing, put it in square brackets like [year] and list what the student should look up. Keep the reply short. Use [TYPE:GENERAL] for the tag.`
     case 'plan':
@@ -1263,6 +1340,32 @@ ${closingLine}`
         if (spec) text = text.trimEnd() + drawingBlock(spec)
       }
     } catch (e) { console.error('Drawing clean-up failed:', e?.message) }
+
+    // Graph quality gate: fix what code can fix, ask the model once about the rest.
+    if (/```graph/.test(text)) {
+      try {
+        const rv = reviewGraphs(text, guardQuestion)
+        text = rv.text
+        const bad = rv.items.filter((it) => it.problems.length)
+        if (bad.length) {
+          trail.push(`graph:${bad.reduce((n, it) => n + it.problems.length, 0)} problem(s)`)
+          if (!rv.items.some((it) => it.skipped) && DEADLINE - Date.now() > 16000) {
+            const fixedItems = await aiGraphFix({ models: GEMINI_MODELS, question: guardQuestion, items: rv.items, deadline: DEADLINE })
+            if (fixedItems) {
+              const better = rv.items.map((old, i) => {
+                const nw = fixedItems[i]
+                return old.problems.length && nw && nw.problems.length < old.problems.length ? nw.spec : null
+              })
+              text = replaceGraphs(text, better)
+              const left = fixedItems.reduce((n, f, i) => n + (better[i] ? f.problems.length : rv.items[i].problems.length), 0)
+              trail.push(left ? `graph-retry:${left} left` : 'graph-retry:fixed')
+            } else {
+              trail.push('graph-retry:failed')
+            }
+          }
+        }
+      } catch (e) { console.error('Graph check failed:', e?.message) }
+    }
 
     // Re-add the plain number lines of a worked solution (code only, no AI call). If one does not
     // add up, say so in one short line instead of leaving a wrong number unflagged.
