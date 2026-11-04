@@ -260,6 +260,7 @@ function GraphView({ spec, c, print }) {
         style={{ padding: '0.6rem 0.4rem 0', touchAction: explore ? 'none' : 'auto', cursor: explore ? 'grab' : 'default', userSelect: 'none' }}
         dangerouslySetInnerHTML={{ __html: out.ok.svg }}
       />
+      {out.ok.caption && <div style={{ padding: '0.15rem 0.8rem 0.55rem', fontSize: '0.74rem', lineHeight: 1.45, color: c.subtext }}>{out.ok.caption}</div>}
       {!print && <Bar c={c} status={explore ? 'Drag to move, pinch to zoom' : ''}>
         <SmallBtn c={c} active={explore} onClick={() => setExplore((v) => !v)}>{explore ? 'Done' : 'Explore'}</SmallBtn>
         {explore && <SmallBtn c={c} label="Zoom in" onClick={() => zoomAt(0.7)}>+</SmallBtn>}
@@ -267,7 +268,7 @@ function GraphView({ spec, c, print }) {
         {explore && view && <SmallBtn c={c} onClick={() => setView(null)}>Reset</SmallBtn>}
         <DownloadControl c={c} name="radius-graph" getOut={() => renderGraph(spec, EXPORT_PAL, view)} />
       </Bar>}
-      {out.ok.notes.length > 0 && <div style={{ padding: '0 0.8rem 0.6rem', fontSize: '0.74rem', color: c.subtext }}>Some curves could not be drawn, so they are left out.</div>}
+      {out.ok.notes.length > 0 && <div style={{ padding: '0 0.8rem 0.6rem', fontSize: '0.74rem', color: c.subtext }}>Not drawn: {out.ok.notes.slice(0, 4).join(' ')}</div>}
     </Frame>
   )
 }

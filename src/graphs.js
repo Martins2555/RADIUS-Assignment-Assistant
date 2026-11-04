@@ -192,12 +192,40 @@ let clipCounter = 0
 
 // ---------------------------------------------------------------------------
 // Spec reading
+// Nothing is dropped quietly: everything that cannot be drawn is listed in
+// `problems` (for the server, which asks the model to fix it) and, when the
+// student asked for it, in `notes` (shown under the graph).
 // ---------------------------------------------------------------------------
+const KNOWN_KEYS = new Set(['type', 'title', 'caption', 'subtitle', 'xlabel', 'ylabel', 'xmin', 'xmax', 'ymin', 'ymax', 'xstep', 'ystep', 'equal', 'markers', 'legend', 'grid', 'curves', 'functions', 'series', 'points', 'vlines', 'hlines', 'lines', 'expect'])
+const LIMITS = { curves: 6, series: 8, seriesPoints: 1500, points: 40, lines: 6, guides: 8 }
+const num = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN)
+const lc = (v) => String(v ?? '').trim().toLowerCase()
+
+const NAMED_COLORS = (p) => ({ accent: p.accent, green: '#2fbf9b', blue: '#4aa3ff', red: '#e5645b', amber: '#e8a33d', orange: '#e8a33d', purple: '#a678f5', black: p.text, grey: p.sub, gray: p.sub })
+function pickColor(raw, fallback, p) {
+  if (typeof raw !== 'string') return fallback
+  const k = raw.trim().toLowerCase()
+  const named = NAMED_COLORS(p)[k]
+  if (named) return named
+  if (/^#[0-9a-f]{3,8}$/.test(k) || /^[a-z]{3,20}$/.test(k)) return k
+  return fallback
+}
+
+function fillLabel(label, x, y, slope) {
+  return String(label ?? '')
+    .replace(/\{x\}/g, isNum(x) ? fmtVal(x) : '')
+    .replace(/\{y\}/g, isNum(y) ? fmtVal(y) : '')
+    .replace(/\{slope(?:\/([0-9.]+))?\}/g, (m, d) => (isNum(slope) ? fmtVal(slope / (d ? Number(d) : 1)) : ''))
+}
+
 function readSpec(spec) {
   const notes = []
+  const problems = []
+  const fixes = []
   const curves = []
   const list = Array.isArray(spec.curves) ? spec.curves : Array.isArray(spec.functions) ? spec.functions : []
-  list.slice(0, 6).forEach((c, i) => {
+  if (list.length > LIMITS.curves) problems.push(`Only ${LIMITS.curves} curves can be drawn, but ${list.length} were given.`)
+  list.slice(0, LIMITS.curves).forEach((c, i) => {
     try {
       if (c && c.param) {
         const fx = compileExpr(c.param.x, 't')
@@ -209,23 +237,291 @@ function readSpec(spec) {
         const src = String(c.expr || c.y).replace(/^\s*y\s*=\s*/i, '')
         const dom = Array.isArray(c.domain) && c.domain.length === 2 ? [Number(c.domain[0]), Number(c.domain[1])] : null
         curves.push({ f: compileExpr(src, 'x'), label: c.label || '', dashed: !!c.dashed, color: c.color, domain: dom && dom.every(isNum) ? dom : null })
+      } else {
+        problems.push(`Curve ${i + 1} has no "expr" and no "param", so it cannot be drawn.`)
       }
     } catch (e) {
       notes.push(`Curve ${i + 1}: ${e.message}`)
+      problems.push(`Curve ${i + 1} (${c && (c.label || c.expr) || '?'}) could not be read: ${e.message}`)
     }
   })
-  const series = (Array.isArray(spec.series) ? spec.series : []).slice(0, 4).map((s) => ({
-    name: s.name || '',
-    points: (Array.isArray(s.points) ? s.points : []).map((q) => [Number(q[0]), Number(q[1])]).filter((q) => isNum(q[0]) && isNum(q[1])).slice(0, 400),
-    line: !!s.line,
-  })).filter((s) => s.points.length)
-  const points = (Array.isArray(spec.points) ? spec.points : []).map((q) => ({ x: Number(q.x), y: Number(q.y), label: q.label || '' })).filter((q) => isNum(q.x) && isNum(q.y)).slice(0, 30)
-  const vlines = (Array.isArray(spec.vlines) ? spec.vlines : []).map((q) => ({ x: Number(q.x), label: q.label || '' })).filter((q) => isNum(q.x)).slice(0, 6)
-  const hlines = (Array.isArray(spec.hlines) ? spec.hlines : []).map((q) => ({ y: Number(q.y), label: q.label || '' })).filter((q) => isNum(q.y)).slice(0, 6)
-  if (!curves.length && !series.length && !points.length) {
+
+  const rawSeries = Array.isArray(spec.series) ? spec.series : []
+  if (rawSeries.length > LIMITS.series) problems.push(`Only ${LIMITS.series} data series can be drawn, but ${rawSeries.length} were given.`)
+  const series = []
+  rawSeries.slice(0, LIMITS.series).forEach((s, i) => {
+    const raw = Array.isArray(s && s.points) ? s.points : []
+    const pts = []
+    let bad = 0
+    raw.forEach((q) => {
+      const x = Array.isArray(q) ? num(q[0]) : NaN
+      const y = Array.isArray(q) ? num(q[1]) : NaN
+      if (isNum(x) && isNum(y)) pts.push([x, y])
+      else bad++
+    })
+    const name = String((s && s.name) || '')
+    const shown = name || `series ${i + 1}`
+    if (bad) {
+      notes.push(`${bad} point(s) of "${shown}" are not numbers and were left out.`)
+      problems.push(`Series "${shown}" has ${bad} point(s) that are not valid [x, y] number pairs.`)
+    }
+    if (pts.length > LIMITS.seriesPoints) problems.push(`Series "${shown}" has ${pts.length} points; the limit is ${LIMITS.seriesPoints}.`)
+    if (!pts.length) { problems.push(`Series "${shown}" has no valid points, so it is not drawn.`); notes.push(`"${shown}" has no valid points.`); return }
+    const line = !!(s && s.line)
+    series.push({
+      name,
+      points: pts.slice(0, LIMITS.seriesPoints),
+      line,
+      dashed: !!(s && s.dashed),
+      color: s && s.color,
+      markers: !line ? true : (s && s.markers === false ? false : pts.length <= 80),
+    })
+  })
+
+  const rawPoints = Array.isArray(spec.points) ? spec.points : []
+  if (rawPoints.length > LIMITS.points) problems.push(`Only ${LIMITS.points} marked points can be drawn, but ${rawPoints.length} were given.`)
+  const pointSpecs = rawPoints.slice(0, LIMITS.points).map((q, i) => {
+    const x = num(q && q.x)
+    const y = num(q && q.y)
+    return { i, x, y, label: String((q && q.label) ?? ''), series: q && q.series, at: q && q.at, line: q && q.line, hasXY: isNum(x) && isNum(y) }
+  })
+  const points = pointSpecs.filter((q) => q.series === undefined && q.at === undefined && q.hasXY).map((q) => ({ x: q.x, y: q.y, label: q.label }))
+
+  const guide = (arr, key, name) => {
+    const src = Array.isArray(arr) ? arr : []
+    if (src.length > LIMITS.guides) problems.push(`Only ${LIMITS.guides} ${name} can be drawn, but ${src.length} were given.`)
+    const out = []
+    src.slice(0, LIMITS.guides).forEach((q) => {
+      const v = num(q && q[key])
+      if (isNum(v)) out.push({ [key]: v, label: String((q && q.label) || '') })
+      else problems.push(`A ${name.replace(/s$/, '')} has no valid "${key}" value.`)
+    })
+    return out
+  }
+  const vlines = guide(spec.vlines, 'x', 'vlines')
+  const hlines = guide(spec.hlines, 'y', 'hlines')
+  const lineSpecs = (Array.isArray(spec.lines) ? spec.lines : []).slice(0, LIMITS.lines)
+  if (Array.isArray(spec.lines) && spec.lines.length > LIMITS.lines) problems.push(`Only ${LIMITS.lines} reference lines can be drawn, but ${spec.lines.length} were given.`)
+
+  Object.keys(spec).forEach((k) => { if (!KNOWN_KEYS.has(k)) problems.push(`The field "${k}" is not supported and would be ignored.`) })
+
+  if (!curves.length && !series.length && !points.length && !pointSpecs.length) {
     throw new Error(notes.length ? `I could not read the equation (${notes[0]}).` : 'Nothing to plot.')
   }
-  return { curves, series, points, vlines, hlines, notes }
+  const expect = (Array.isArray(spec.expect) ? spec.expect : []).map((e) => String(e)).filter(Boolean).slice(0, 20)
+  return { curves, series, points, pointSpecs, lineSpecs, lines: [], vlines, hlines, notes, problems, fixes, expect }
+}
+
+// ---------------------------------------------------------------------------
+// Anchoring: labelled points and reference lines are worked out from the data
+// here, so a label can never sit away from the point it names.
+// ---------------------------------------------------------------------------
+function seriesRef(R, ref) {
+  if (!R.series.length) return null
+  if (ref === undefined || ref === null || ref === '') return R.series.length === 1 ? R.series[0] : null
+  if (typeof ref === 'number') return R.series[ref] || null
+  const k = lc(ref)
+  return R.series.find((s) => lc(s.name) === k) || R.series.find((s) => lc(s.name).includes(k) || (k.length > 2 && k.includes(lc(s.name)) && lc(s.name))) || null
+}
+
+function lineRef(lines, ref) {
+  if (typeof ref === 'number') return lines[ref] || null
+  const k = lc(ref)
+  return lines.find((l) => lc(l.label) === k) || lines.find((l) => lc(l.rawLabel).includes(k) && k) || null
+}
+
+function interpAt(pts, x) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [xa, ya] = pts[i]
+    const [xb, yb] = pts[i + 1]
+    if ((x >= xa && x <= xb) || (x <= xa && x >= xb)) {
+      if (xa === xb) return [x, ya]
+      return [x, ya + ((yb - ya) * (x - xa)) / (xb - xa)]
+    }
+  }
+  return null
+}
+
+function polyMeets(pts, fn, xStart) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [xa, ya] = pts[i]
+    const [xb, yb] = pts[i + 1]
+    if (Math.max(xa, xb) < xStart) continue
+    const da = ya - fn(xa)
+    const db = yb - fn(xb)
+    if (da === 0 && xa >= xStart) return [xa, ya]
+    if (da * db < 0) {
+      const t = da / (da - db)
+      const x = xa + t * (xb - xa)
+      if (x >= xStart - 1e-12) return [x, ya + t * (yb - ya)]
+    }
+  }
+  return null
+}
+
+function anchorGraph(R, view) {
+  const rx = view.xmax - view.xmin || 1
+  const ry = view.ymax - view.ymin || 1
+  const allVerts = []
+  R.series.forEach((s, si) => s.points.forEach((q) => allVerts.push({ x: q[0], y: q[1], si })))
+  const nearest = (x, y, verts) => {
+    let best = null
+    verts.forEach((v) => {
+      const d = Math.hypot((v.x - x) / rx, (v.y - y) / ry)
+      if (!best || d < best.d) best = { d, v }
+    })
+    return best
+  }
+
+  // 1. reference lines
+  R.lines = []
+  R.lineSpecs.forEach((L, i) => {
+    const rawLabel = String((L && L.label) || '')
+    const shown = rawLabel || `line ${i + 1}`
+    let x0
+    let y0
+    let slope
+    let defA = view.xmin
+    let defB = view.xmax
+    if (L && L.fit) {
+      const s = seriesRef(R, L.fit.series)
+      if (!s) { R.problems.push(`Line "${shown}" fits series "${L.fit.series ?? ''}", but there is no such series. Series names: ${R.series.map((q) => q.name || '(unnamed)').join(', ') || 'none'}.`); R.notes.push(`Line "${shown}" could not be drawn.`); return }
+      const fa = Array.isArray(L.fit.x) && isNum(num(L.fit.x[0])) ? num(L.fit.x[0]) : -Infinity
+      const fb = Array.isArray(L.fit.x) && isNum(num(L.fit.x[1])) ? num(L.fit.x[1]) : Infinity
+      const eps = Math.abs(rx) * 1e-9
+      const pts = s.points.filter((q) => q[0] >= fa - eps && q[0] <= fb + eps)
+      if (pts.length < 2) { R.problems.push(`Line "${shown}": fewer than 2 points of "${s.name}" lie in the fit range, so no line can be fitted.`); R.notes.push(`Line "${shown}" could not be drawn.`); return }
+      const n = pts.length
+      let m
+      let c
+      if (L.fit.origin) {
+        const sxx = pts.reduce((t, q) => t + q[0] * q[0], 0)
+        m = sxx ? pts.reduce((t, q) => t + q[0] * q[1], 0) / sxx : 0
+        c = 0
+      } else {
+        const mx = pts.reduce((t, q) => t + q[0], 0) / n
+        const my = pts.reduce((t, q) => t + q[1], 0) / n
+        const sxx = pts.reduce((t, q) => t + (q[0] - mx) ** 2, 0)
+        m = sxx ? pts.reduce((t, q) => t + (q[0] - mx) * (q[1] - my), 0) / sxx : 0
+        c = my - m * mx
+      }
+      x0 = 0
+      y0 = c
+      slope = m
+      defA = isFinite(fa) ? Math.min(0, fa) : view.xmin
+      defB = isFinite(fb) ? fb : view.xmax
+    } else {
+      const from = (L && (L.from || L.through)) || null
+      const fx = Array.isArray(from) ? num(from[0]) : NaN
+      const fy = Array.isArray(from) ? num(from[1]) : NaN
+      if (!isNum(fx) || !isNum(fy)) { R.problems.push(`Line "${shown}" needs a start point "from":[x, y], or a "fit".`); R.notes.push(`Line "${shown}" could not be drawn.`); return }
+      x0 = fx
+      y0 = fy
+      if (isNum(num(L.slope))) slope = num(L.slope)
+      else if (L.parallelTo !== undefined) {
+        const ref = lineRef(R.lines, L.parallelTo)
+        if (!ref) { R.problems.push(`Line "${shown}" is parallel to "${L.parallelTo}", but no earlier line has that label.`); R.notes.push(`Line "${shown}" could not be drawn.`); return }
+        slope = ref.slope
+      } else if (Array.isArray(L.to) && isNum(num(L.to[0])) && isNum(num(L.to[1])) && num(L.to[0]) !== x0) slope = (num(L.to[1]) - y0) / (num(L.to[0]) - x0)
+      else { R.problems.push(`Line "${shown}" needs a "slope", a "to" point, or "parallelTo".`); R.notes.push(`Line "${shown}" could not be drawn.`); return }
+      defA = x0
+    }
+    let xa = defA
+    let xb = defB
+    if (Array.isArray(L.x) && isNum(num(L.x[0])) && isNum(num(L.x[1]))) { xa = num(L.x[0]); xb = num(L.x[1]) }
+    const yAt = (x) => y0 + slope * (x - x0)
+    const lo = Math.min(yAt(xa), yAt(xb))
+    const hi = Math.max(yAt(xa), yAt(xb))
+    if (hi < view.ymin || lo > view.ymax || Math.max(xa, xb) < view.xmin || Math.min(xa, xb) > view.xmax) {
+      R.problems.push(`Line "${shown}" lies completely outside the axes, so it would not be visible.`)
+      R.notes.push(`Line "${shown}" is outside the graph.`)
+    }
+    R.lines.push({ label: fillLabel(rawLabel, undefined, undefined, slope), rawLabel, x0, y0, slope, xa, xb, dashed: !!L.dashed, color: L.color })
+  })
+
+  // 2. labelled points
+  const points = []
+  R.pointSpecs.forEach((q) => {
+    const shown = q.label || `point ${q.i + 1}`
+    const anchored = q.series !== undefined || q.at !== undefined
+    let x
+    let y
+    if (anchored) {
+      const s = seriesRef(R, q.series)
+      const at = lc(q.at)
+      if (!s && at !== 'intersect') {
+        R.problems.push(`Point "${shown}" is placed on series "${q.series ?? ''}", but there is no such series. Series names: ${R.series.map((z) => z.name || '(unnamed)').join(', ') || 'none'}.`)
+        R.notes.push(`Point "${shown}" could not be placed.`)
+        return
+      }
+      if (at === 'max' || at === 'min') {
+        const best = s.points.reduce((b, v) => (b === null || (at === 'max' ? v[1] > b[1] : v[1] < b[1]) ? v : b), null)
+        ;[x, y] = best
+      } else if (at === 'first') { [x, y] = s.points[0] } else if (at === 'last') { [x, y] = s.points[s.points.length - 1] } else if (at === 'x') {
+        const xv = num(q.x)
+        const hit = isNum(xv) ? interpAt(s.points, xv) : null
+        if (!hit) { R.problems.push(`Point "${shown}": x = ${q.x ?? '?'} is outside the data of series "${s.name}".`); R.notes.push(`Point "${shown}" could not be placed.`); return }
+        ;[x, y] = hit
+      } else if (at === 'intersect') {
+        const L = lineRef(R.lines, q.line)
+        const target = seriesRef(R, q.series)
+        if (!L || !target) { R.problems.push(`Point "${shown}" meets line "${q.line ?? ''}" and series "${q.series ?? ''}", but one of them does not exist.`); R.notes.push(`Point "${shown}" could not be placed.`); return }
+        const hit = polyMeets(target.points, (xv) => L.y0 + L.slope * (xv - L.x0), Math.min(L.xa, L.xb))
+        if (!hit) { R.problems.push(`Line "${L.rawLabel || 'line'}" never meets series "${target.name}", so "${shown}" cannot be placed. Check the line's start point and slope.`); R.notes.push(`Point "${shown}" could not be placed.`); return }
+        ;[x, y] = hit
+      } else if (q.hasXY && s) {
+        const near = nearest(q.x, q.y, s.points.map((v) => ({ x: v[0], y: v[1] })))
+        if (near.d > 0.08) { R.problems.push(`Point "${shown}" is not on series "${s.name}" (the nearest data point is ${Math.round(near.d * 100)}% of the plot away). Use "at":"max", "min", "first", "last" or "at":"x" with "x", instead of typing coordinates.`); R.notes.push(`Point "${shown}" could not be placed.`); return }
+        if (near.d > 1e-9) R.fixes.push(`Moved "${shown}" onto the data point of "${s.name}".`)
+        x = near.v.x
+        y = near.v.y
+      } else {
+        R.problems.push(`Point "${shown}" has "series" but no "at" and no x and y.`)
+        R.notes.push(`Point "${shown}" could not be placed.`)
+        return
+      }
+    } else if (q.hasXY) {
+      x = q.x
+      y = q.y
+      const near = allVerts.length ? nearest(x, y, allVerts) : null
+      if (near && near.d <= 0.05 && near.d > 1e-9) {
+        R.fixes.push(`Moved "${shown}" onto the nearest data point.`)
+        x = near.v.x
+        y = near.v.y
+      }
+    } else {
+      R.problems.push(`Point "${shown}" has no position.`)
+      R.notes.push(`Point "${shown}" could not be placed.`)
+      return
+    }
+    points.push({ x, y, label: fillLabel(q.label, x, y), rawLabel: q.label })
+  })
+  R.points = points
+}
+
+// The view, the points and the lines, resolved from one spec.
+export function resolveGraph(spec, { view: override } = {}) {
+  const R = readSpec(spec || {})
+  const view = override && isNum(override.xmin) ? { ...override } : autoView(R, spec || {})
+  anchorGraph(R, view)
+  return { R, view }
+}
+
+// A plain-words description built from what is really drawn.
+function describeGraph(R, view, shownLabels) {
+  const parts = []
+  R.curves.forEach((c, i) => parts.push(`${c.label || `curve ${i + 1}`} (${c.dashed ? 'dashed' : 'solid'} line)`))
+  R.series.forEach((s, i) => {
+    const style = s.line ? `${s.dashed ? 'dashed' : 'solid'} line${s.markers ? ' with markers' : ''}` : 'points only'
+    parts.push(`${s.name || `series ${i + 1}`} (${style})`)
+  })
+  R.lines.forEach((l, i) => parts.push(`${l.label || `line ${i + 1}`} (${l.dashed ? 'dashed' : 'solid'} line)`))
+  R.vlines.concat(R.hlines).forEach((g) => { if (g.label) parts.push(`${g.label} (guide line)`) })
+  const marks = shownLabels.map((m) => `${m.text} at (${fmtVal(m.x)}, ${fmtVal(m.y)})`)
+  let out = parts.length ? `Drawn: ${parts.join('; ')}.` : ''
+  if (marks.length) out += `${out ? ' ' : ''}Marked: ${marks.join('; ')}.`
+  out += `${out ? ' ' : ''}Axes: x from ${fmtVal(view.xmin)} to ${fmtVal(view.xmax)}, y from ${fmtVal(view.ymin)} to ${fmtVal(view.ymax)}.`
+  return out
 }
 
 function sampleCurve(c, x0, x1, n) {
@@ -377,14 +673,19 @@ function findSpecial(c, view) {
 // Rendering
 // ---------------------------------------------------------------------------
 export function renderGraph(spec, p, viewOverride) {
-  const R = readSpec(spec || {})
+  spec = spec || {}
+  const { R, view } = resolveGraph(spec, { view: viewOverride })
   const W = 380
   const colors = CURVE_COLORS(p)
-  const view = viewOverride && isNum(viewOverride.xmin) ? { ...viewOverride } : autoView(R, spec || {})
+  const curveColor = (c, i) => pickColor(c.color, colors[i % colors.length], p)
+  const seriesColor = (s, i) => pickColor(s.color, colors[(R.curves.length + i) % colors.length], p)
+  const lineColor = (l, i) => pickColor(l.color, colors[(R.curves.length + R.series.length + i) % colors.length], p)
   const legend = []
+  const renderProblems = []
 
-  R.curves.forEach((c, i) => { if (c.label) legend.push({ label: c.label, color: c.color || colors[i % colors.length], dashed: c.dashed, kind: 'line' }) })
-  R.series.forEach((s, i) => { if (s.name) legend.push({ label: s.name, color: colors[(R.curves.length + i) % colors.length], kind: 'dot' }) })
+  R.curves.forEach((c, i) => { if (c.label) legend.push({ label: c.label, color: curveColor(c, i), dashed: c.dashed, kind: 'line' }) })
+  R.series.forEach((s, i) => { if (s.name) legend.push({ label: s.name, color: seriesColor(s, i), dashed: s.dashed, kind: s.line ? 'line' : 'dot', marker: s.line && s.markers }) })
+  R.lines.forEach((l, i) => { if (l.label) legend.push({ label: l.label, color: lineColor(l, i), dashed: l.dashed, kind: 'line' }) })
   const showLegend = legend.length > 1 || (legend.length === 1 && legend[0].label !== spec.title)
   const title = spec.title ? prettyPow(spec.title) : ''
   const headH = (title ? 26 : 10) + (showLegend ? legend.length * 17 + 4 : 0)
@@ -416,14 +717,17 @@ export function renderGraph(spec, p, viewOverride) {
     legend.forEach((lg, i) => {
       const y = (title ? 26 : 10) + i * 17 + 8
       if (lg.kind === 'dot') body += `<circle cx="${left + 9}" cy="${y - 3}" r="3.5" fill="${lg.color}"/>`
-      else body += `<line x1="${left}" y1="${y - 3}" x2="${left + 18}" y2="${y - 3}" stroke="${lg.color}" stroke-width="2.4"${lg.dashed ? ' stroke-dasharray="5 3"' : ''} stroke-linecap="round"/>`
+      else {
+        body += `<line x1="${left}" y1="${y - 3}" x2="${left + 18}" y2="${y - 3}" stroke="${lg.color}" stroke-width="2.4"${lg.dashed ? ' stroke-dasharray="5 3"' : ''} stroke-linecap="round"/>`
+        if (lg.marker) body += `<circle cx="${left + 9}" cy="${y - 3}" r="3" fill="${lg.color}"/>`
+      }
       body += `<text x="${left + 26}" y="${y}" font-size="12" fill="${p.text}" font-family="${FONT}">${esc(lg.label)}</text>`
     })
   }
 
   // grid + tick labels on the border of the plot
-  const sx = niceStep(xmax - xmin)
-  const sy = niceStep(ymax - ymin)
+  const sx = isNum(num(spec.xstep)) && num(spec.xstep) > 0 && (xmax - xmin) / num(spec.xstep) <= 40 ? num(spec.xstep) : niceStep(xmax - xmin)
+  const sy = isNum(num(spec.ystep)) && num(spec.ystep) > 0 && (ymax - ymin) / num(spec.ystep) <= 40 ? num(spec.ystep) : niceStep(ymax - ymin)
   for (let v = Math.ceil(xmin / sx - 1e-9) * sx; v <= xmax + sx * 1e-9; v += sx) {
     const px = X(v)
     body += `<line x1="${r1(px)}" y1="${top}" x2="${r1(px)}" y2="${bottom}" stroke="${p.grid}" stroke-width="1"/>`
@@ -455,7 +759,7 @@ export function renderGraph(spec, p, viewOverride) {
   // curves
   const N = Math.max(400, Math.round(pw * 1.6))
   R.curves.forEach((c, i) => {
-    const col = c.color || colors[i % colors.length]
+    const col = curveColor(c, i)
     const pts = sampleCurve(c, xmin, xmax, c.param ? 700 : N)
     let d = ''
     let pen = false
@@ -472,35 +776,74 @@ export function renderGraph(spec, p, viewOverride) {
     })
     if (d) body += `<path d="${d}" fill="none" stroke="${col}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"${c.dashed ? ' stroke-dasharray="7 5"' : ''}/>`
   })
-  // data series
+  // reference lines (fitted lines, offset lines ...)
+  R.lines.forEach((l, i) => {
+    const col = lineColor(l, i)
+    let xa = l.xa
+    let xb = l.xb
+    const yAt = (x) => l.y0 + l.slope * (x - l.x0)
+    if (l.slope) {
+      // keep the coordinates sane when the line shoots far off the plot
+      const lo = (ymin - (ymax - ymin)) , hi = (ymax + (ymax - ymin))
+      const t1 = l.x0 + (lo - l.y0) / l.slope
+      const t2 = l.x0 + (hi - l.y0) / l.slope
+      const a = Math.min(t1, t2)
+      const b = Math.max(t1, t2)
+      xa = Math.max(Math.min(xa, xb), a)
+      xb = Math.min(Math.max(l.xa, l.xb), b)
+    }
+    if (xb < xa) return
+    body += `<line x1="${r1(X(xa))}" y1="${r1(Y(yAt(xa)))}" x2="${r1(X(xb))}" y2="${r1(Y(yAt(xb)))}" stroke="${col}" stroke-width="2" stroke-linecap="round"${l.dashed ? ' stroke-dasharray="7 5"' : ''}/>`
+  })
+  // data series (lines are clipped to the plot; markers are drawn below, unclipped)
   R.series.forEach((s, i) => {
-    const col = colors[(R.curves.length + i) % colors.length]
-    if (s.line) body += `<polyline points="${s.points.map((q) => `${r1(X(q[0]))},${r1(Y(q[1]))}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>`
-    s.points.forEach((q) => { body += `<circle cx="${r1(X(q[0]))}" cy="${r1(Y(q[1]))}" r="3.6" fill="${col}"/>` })
+    const col = seriesColor(s, i)
+    if (s.line) body += `<polyline points="${s.points.map((q) => `${r1(X(q[0]))},${r1(Y(q[1]))}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"${s.dashed ? ' stroke-dasharray="7 5"' : ''}/>`
   })
   body += '</g>'
+  // Markers sit on top and are not clipped, so a point on the edge of the plot (the last point at the axis limit) stays whole.
+  const epsX = (xmax - xmin) * 1e-6
+  const epsY = (ymax - ymin) * 1e-6
+  R.series.forEach((s, i) => {
+    if (!s.markers) return
+    const col = seriesColor(s, i)
+    s.points.forEach((q) => {
+      if (q[0] < xmin - epsX || q[0] > xmax + epsX || q[1] < ymin - epsY || q[1] > ymax + epsY) return
+      body += `<circle cx="${r1(X(q[0]))}" cy="${r1(Y(q[1]))}" r="3.6" fill="${col}"/>`
+    })
+  })
 
   // marked points with labels that avoid each other
   const placed = []
+  const shownLabels = []
   const labelAt = (px, py, text, col) => {
     const w = text.length * 6.3 + 6
     const hgt = 14
-    const cands = [[7, -8], [-7 - w, -8], [7, 16], [-7 - w, 16], [-w / 2, 22], [-w / 2, -14]]
+    const cands = [[7, -8], [-7 - w, -8], [7, 16], [-7 - w, 16], [-w / 2, 22], [-w / 2, -14], [7, -24], [-7 - w, -24], [7, 32], [-7 - w, 32], [-w / 2, 38], [-w / 2, -30]]
+    const inBounds = (bx, by) => !(bx < left + 1 || bx + w > right - 1 || by < top + 1 || by + hgt > bottom - 1)
+    const overlaps = (bx, by) => placed.some((q) => bx < q.x + q.w && bx + w > q.x && by < q.y + q.h && by + hgt > q.y)
+    let pick = null
+    let fallback = null
     for (const [dx, dy] of cands) {
       const bx = px + dx
       const by = py + dy - 11
-      if (bx < left + 1 || bx + w > right - 1 || by < top + 1 || by + hgt > bottom - 1) continue
-      if (placed.some((q) => bx < q.x + q.w && bx + w > q.x && by < q.y + q.h && by + hgt > q.y)) continue
-      placed.push({ x: bx, y: by, w, h: hgt })
-      return `<text x="${r1(bx + 3)}" y="${r1(by + 11)}" font-size="11" font-weight="600" fill="${col}" font-family="${FONT}" paint-order="stroke" stroke="${p.bg}" stroke-width="3" stroke-linejoin="round">${esc(text)}</text>`
+      if (!inBounds(bx, by)) continue
+      if (!fallback) fallback = [bx, by]
+      if (overlaps(bx, by)) continue
+      pick = [bx, by]
+      break
     }
-    return ''
+    // A label that overlaps another is better than a label that is missing.
+    const at = pick || fallback
+    if (!at) return null
+    placed.push({ x: at[0], y: at[1], w, h: hgt })
+    return `<text x="${r1(at[0] + 3)}" y="${r1(at[1] + 11)}" font-size="11" font-weight="600" fill="${col}" font-family="${FONT}" paint-order="stroke" stroke="${p.bg}" stroke-width="3" stroke-linejoin="round">${esc(text)}</text>`
   }
-  const inside = (px, py) => px >= left && px <= right && py >= top && py <= bottom
+  const inside = (px, py) => px >= left - 0.5 && px <= right + 0.5 && py >= top - 0.5 && py <= bottom + 0.5
   if (spec.markers !== false && R.curves.length <= 3) {
     const found = []
     R.curves.forEach((c, i) => {
-      const col = c.color || colors[i % colors.length]
+      const col = curveColor(c, i)
       const seen = []
       findSpecial(c, view).forEach((sp) => {
         const px = X(sp.x)
@@ -517,18 +860,30 @@ export function renderGraph(spec, p, viewOverride) {
       found.sort((m, n) => rank[m.sp.kind] - rank[n.sp.kind])
       found.forEach(({ sp, px, py, col }) => {
         body += `<circle cx="${r1(px)}" cy="${r1(py)}" r="4" fill="${p.bg}" stroke="${col}" stroke-width="2"/>`
-        body += labelAt(px, py, `(${fmtVal(sp.x)}, ${fmtVal(sp.y)})`, p.text)
+        const t = labelAt(px, py, `(${fmtVal(sp.x)}, ${fmtVal(sp.y)})`, p.text)
+        if (t) body += t
       })
     }
   }
   R.points.forEach((q) => {
     const px = X(q.x)
     const py = Y(q.y)
-    if (!inside(px, py)) return
+    if (!inside(px, py)) {
+      renderProblems.push(`Point "${q.label || fmtVal(q.x) + ', ' + fmtVal(q.y)}" is outside the axes, so it is not shown.`)
+      return
+    }
     body += `<circle cx="${r1(px)}" cy="${r1(py)}" r="4.4" fill="${p.accent}" stroke="${p.bg}" stroke-width="1.5"/>`
-    body += labelAt(px, py, q.label || `(${fmtVal(q.x)}, ${fmtVal(q.y)})`, p.text)
+    const text = q.label || `(${fmtVal(q.x)}, ${fmtVal(q.y)})`
+    const t = labelAt(px, py, text, p.text)
+    if (t) { body += t; shownLabels.push({ text, x: q.x, y: q.y }) } else renderProblems.push(`The label "${text}" does not fit inside the plot.`)
   })
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" font-family="${FONT}">${body}</svg>`
-  return { svg, width: W, height: H, plot: { x: left, y: top, w: pw, h: ph }, view, notes: R.notes }
+  return {
+    svg, width: W, height: H, plot: { x: left, y: top, w: pw, h: ph }, view, notes: R.notes,
+    caption: describeGraph(R, view, shownLabels),
+    problems: [...R.problems, ...renderProblems],
+    fixes: R.fixes,
+    resolved: R,
+  }
 }
