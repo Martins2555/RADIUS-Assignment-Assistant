@@ -726,8 +726,26 @@ export function renderGraph(spec, p, viewOverride) {
   }
 
   // grid + tick labels on the border of the plot
-  const sx = isNum(num(spec.xstep)) && num(spec.xstep) > 0 && (xmax - xmin) / num(spec.xstep) <= 40 ? num(spec.xstep) : niceStep(xmax - xmin)
-  const sy = isNum(num(spec.ystep)) && num(spec.ystep) > 0 && (ymax - ymin) / num(spec.ystep) <= 40 ? num(spec.ystep) : niceStep(ymax - ymin)
+  const nextNice = (st) => {
+    const base = Math.pow(10, Math.floor(Math.log10(st) + 1e-9))
+    const m = st / base
+    return m < 1.5 ? 2 * base : m < 3.5 ? 5 * base : 10 * base
+  }
+  // Ticks must never run into each other: if the labels would touch, use a wider step.
+  const fitStep = (given, range, lo, hi, px, labelPx, gap) => {
+    const g = num(given)
+    if (isNum(g) && g > 0 && range / g <= 40) return g
+    let st = niceStep(range)
+    for (let k = 0; k < 8; k++) {
+      let longest = 1
+      for (let v = Math.ceil(lo / st - 1e-9) * st; v <= hi + st * 1e-9; v += st) longest = Math.max(longest, tickLabel(v, st).length)
+      if ((st / range) * px >= labelPx(longest) + gap) break
+      st = nextNice(st)
+    }
+    return st
+  }
+  const sx = fitStep(spec.xstep, xmax - xmin, xmin, xmax, pw, (n) => n * 6.4, 8)
+  const sy = fitStep(spec.ystep, ymax - ymin, ymin, ymax, ph, () => 11, 7)
   for (let v = Math.ceil(xmin / sx - 1e-9) * sx; v <= xmax + sx * 1e-9; v += sx) {
     const px = X(v)
     body += `<line x1="${r1(px)}" y1="${top}" x2="${r1(px)}" y2="${bottom}" stroke="${p.grid}" stroke-width="1"/>`
@@ -746,6 +764,17 @@ export function renderGraph(spec, p, viewOverride) {
   if (xl) body += `<text x="${(left + right) / 2}" y="${bottom + 36}" text-anchor="middle" font-size="12.5" font-style="italic" fill="${p.text}" font-family="${FONT}">${esc(xl)}</text>`
   if (yl) body += `<text x="12" y="${r1(top + ph / 2)}" text-anchor="middle" transform="rotate(-90 12 ${r1(top + ph / 2)})" font-size="12.5" font-style="italic" fill="${p.text}" font-family="${FONT}">${esc(yl)}</text>`
 
+  // Everything drawn as a line is an obstacle that labels keep away from.
+  const obstacles = []
+  const addPath = (pts) => {
+    for (let i = 0; i < pts.length - 1 && obstacles.length < 30000; i++) {
+      const [x1, y1] = pts[i]
+      const [x2, y2] = pts[i + 1]
+      if (![x1, y1, x2, y2].every(isFinite)) continue
+      const n = Math.min(250, Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 3)))
+      for (let k = 0; k <= n; k++) obstacles.push([x1 + ((x2 - x1) * k) / n, y1 + ((y2 - y1) * k) / n])
+    }
+  }
   body += `<g clip-path="url(#${cid})">`
   // guide lines
   R.vlines.forEach((q) => {
@@ -775,8 +804,17 @@ export function renderGraph(spec, p, viewOverride) {
       prevY = py
     })
     if (d) body += `<path d="${d}" fill="none" stroke="${col}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"${c.dashed ? ' stroke-dasharray="7 5"' : ''}/>`
+    addPath(pts.map(([x, y]) => [X(x), Y(y)]).filter(([qx, qy]) => qx >= left - 20 && qx <= right + 20 && qy >= top - 20 && qy <= bottom + 20))
   })
-  // reference lines (fitted lines, offset lines ...)
+  // data series (lines are clipped to the plot; markers are drawn below, unclipped)
+  R.series.forEach((s, i) => {
+    const col = seriesColor(s, i)
+    if (s.line) {
+      body += `<polyline points="${s.points.map((q) => `${r1(X(q[0]))},${r1(Y(q[1]))}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"${s.dashed ? ' stroke-dasharray="7 5"' : ''}/>`
+      addPath(s.points.map((q) => [X(q[0]), Y(q[1])]))
+    } else s.points.forEach((q) => obstacles.push([X(q[0]), Y(q[1])]))
+  })
+  // reference lines (fitted lines, offset lines ...) go on top of the data, so a fitted line stays visible
   R.lines.forEach((l, i) => {
     const col = lineColor(l, i)
     let xa = l.xa
@@ -794,11 +832,7 @@ export function renderGraph(spec, p, viewOverride) {
     }
     if (xb < xa) return
     body += `<line x1="${r1(X(xa))}" y1="${r1(Y(yAt(xa)))}" x2="${r1(X(xb))}" y2="${r1(Y(yAt(xb)))}" stroke="${col}" stroke-width="2" stroke-linecap="round"${l.dashed ? ' stroke-dasharray="7 5"' : ''}/>`
-  })
-  // data series (lines are clipped to the plot; markers are drawn below, unclipped)
-  R.series.forEach((s, i) => {
-    const col = seriesColor(s, i)
-    if (s.line) body += `<polyline points="${s.points.map((q) => `${r1(X(q[0]))},${r1(Y(q[1]))}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"${s.dashed ? ' stroke-dasharray="7 5"' : ''}/>`
+    addPath([[X(xa), Y(yAt(xa))], [X(xb), Y(yAt(xb))]])
   })
   body += '</g>'
   // Markers sit on top and are not clipped, so a point on the edge of the plot (the last point at the axis limit) stays whole.
@@ -819,25 +853,41 @@ export function renderGraph(spec, p, viewOverride) {
   const labelAt = (px, py, text, col) => {
     const w = text.length * 6.3 + 6
     const hgt = 14
-    const cands = [[7, -8], [-7 - w, -8], [7, 16], [-7 - w, 16], [-w / 2, 22], [-w / 2, -14], [7, -24], [-7 - w, -24], [7, 32], [-7 - w, 32], [-w / 2, 38], [-w / 2, -30]]
+    // Candidate spots around the point, nearest first, on both sides and at several distances.
+    const cands = []
+    for (const dy of [-8, 16, -24, 32, -40, 48, -56, 64, 80, -72]) {
+      for (const dx of [7, -7 - w, -w / 2, 30, -30 - w, 55, -55 - w, 85, -85 - w, 120, -120 - w]) cands.push([dx, dy, Math.hypot(Math.max(0, Math.abs(dx + (dx < 0 ? w : 0))) , Math.abs(dy))])
+    }
+    cands.sort((m, n) => m[2] - n[2])
     const inBounds = (bx, by) => !(bx < left + 1 || bx + w > right - 1 || by < top + 1 || by + hgt > bottom - 1)
     const overlaps = (bx, by) => placed.some((q) => bx < q.x + q.w && bx + w > q.x && by < q.y + q.h && by + hgt > q.y)
-    let pick = null
-    let fallback = null
-    for (const [dx, dy] of cands) {
+    const hits = (bx, by) => {
+      let n = 0
+      for (let i = 0; i < obstacles.length; i++) {
+        const o = obstacles[i]
+        if (o[0] >= bx - 1 && o[0] <= bx + w + 1 && o[1] >= by - 1 && o[1] <= by + hgt + 1) n++
+      }
+      return n
+    }
+    // Best position: inside the plot, not on another label, touching as little of the drawn lines as possible, and as close to the point as that allows.
+    let at = null
+    let best = Infinity
+    for (const [dx, dy, dist] of cands) {
       const bx = px + dx
       const by = py + dy - 11
       if (!inBounds(bx, by)) continue
-      if (!fallback) fallback = [bx, by]
-      if (overlaps(bx, by)) continue
-      pick = [bx, by]
-      break
+      const score = (overlaps(bx, by) ? 1e6 : 0) + hits(bx, by) * 100 + dist * 0.3
+      if (score < best) { best = score; at = [bx, by] }
     }
-    // A label that overlaps another is better than a label that is missing.
-    const at = pick || fallback
+    // A label that overlaps something is better than a label that is missing.
     if (!at) return null
     placed.push({ x: at[0], y: at[1], w, h: hgt })
-    return `<text x="${r1(at[0] + 3)}" y="${r1(at[1] + 11)}" font-size="11" font-weight="600" fill="${col}" font-family="${FONT}" paint-order="stroke" stroke="${p.bg}" stroke-width="3" stroke-linejoin="round">${esc(text)}</text>`
+    // A label placed away from its point gets a thin leader line.
+    const cx = Math.min(Math.max(px, at[0]), at[0] + w)
+    const cy = Math.min(Math.max(py, at[1]), at[1] + hgt)
+    const far = Math.hypot(px - cx, py - cy) > 22
+    const leader = far ? `<line x1="${r1(px)}" y1="${r1(py)}" x2="${r1(cx)}" y2="${r1(cy)}" stroke="${p.sub}" stroke-width="0.9"/>` : ''
+    return `${leader}<text x="${r1(at[0] + 3)}" y="${r1(at[1] + 11)}" font-size="11" font-weight="600" fill="${col}" font-family="${FONT}" paint-order="stroke" stroke="${p.bg}" stroke-width="3" stroke-linejoin="round">${esc(text)}</text>`
   }
   const inside = (px, py) => px >= left - 0.5 && px <= right + 0.5 && py >= top - 0.5 && py <= bottom + 0.5
   if (spec.markers !== false && R.curves.length <= 3) {

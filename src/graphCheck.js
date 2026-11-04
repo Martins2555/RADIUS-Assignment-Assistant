@@ -63,7 +63,7 @@ export function checkGraph(spec, { question = '' } = {}) {
 
   // Safe fixes: labelled points sit exactly on the data, series keep only what is inside the axes.
   if (R.pointSpecs.length) {
-    fixed.points = R.points.map((q) => ({ x: Number(q.x.toPrecision(10)), y: Number(q.y.toPrecision(10)), label: q.label }))
+    fixed.points = R.points.map((q) => ({ x: Number(q.x.toPrecision(10)), y: Number(q.y.toPrecision(10)), label: q.rawLabel ?? q.label }))
   }
   const eps = 0.02
   const rx = view.xmax - view.xmin
@@ -79,4 +79,68 @@ export function checkGraph(spec, { question = '' } = {}) {
   }
   const after = renderGraph(fixed, CHECK_PAL)
   return { spec: fixed, problems: problems.filter((p, i, a) => a.indexOf(p) === i), fixes, caption: after.caption }
+}
+
+// ---------------------------------------------------------------------------
+// Values in the written reply must agree with the graph.
+//
+// A labelled point such as "Proof stress {y} MPa" or a fitted line such as
+// "E = {slope/1000} GPa" is worked out by the app from the data. If the reply
+// states the same quantity with a number that is a little off (the model's own
+// arithmetic), the number is replaced with the graph's. Only near misses are
+// touched (between 1% and 10% off), so a different quantity on the same line,
+// for example "true stress at UTS", is left alone.
+// ---------------------------------------------------------------------------
+const NEAR_MIN = 0.01
+const NEAR_MAX = 0.10
+const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const fmt = (v) => String(Number(Number(v).toPrecision(4)))
+
+function readingsFromGraph(spec) {
+  const out = []
+  let ctx
+  try { ctx = resolveGraph(spec) } catch (e) { return out }
+  ctx.R.points.forEach((q) => {
+    const raw = String(q.rawLabel || '')
+    const m = raw.match(/^(.*?)[\s:=,(-]*\{y\}\s*([A-Za-z%\u00b0\u03a9\/\u00b7^0-9-]*)/)
+    if (!m) return
+    const name = m[1].replace(/[\s:=,(-]+$/g, '').replace(/\s*=\s*$/, '').trim()
+    if (name.length >= 3 && /[A-Za-z]/.test(name)) out.push({ name, unit: m[2] || '', value: q.y })
+  })
+  ctx.R.lines.forEach((l) => {
+    const m = String(l.rawLabel || '').match(/([A-Za-z][A-Za-z_]{0,3})\s*=\s*\{slope(?:\/([0-9.]+))?\}\s*([A-Za-z%\/]*)/)
+    if (!m) return
+    const div = m[2] ? Number(m[2]) : 1
+    out.push({ symbol: m[1], unit: m[3] || '', value: l.slope / div })
+  })
+  return out
+}
+
+export function reconcileValues(text, specs) {
+  const readings = (specs || []).flatMap(readingsFromGraph)
+  if (!readings.length) return { text, changes: [] }
+  const changes = []
+  // never edit inside code blocks
+  const parts = String(text).split(/(```[\s\S]*?```)/g)
+  const fixLine = (line) => {
+    if (line.length > 260) return line
+    let out = line
+    readings.forEach((r) => {
+      const unit = r.unit ? `\\s*${escRe(r.unit)}\\b` : ''
+      const re = r.symbol
+        ? new RegExp(`(\\b${escRe(r.symbol)}\\s*(?:=|\\u2248|~)\\s*)(-?[0-9]+(?:\\.[0-9]+)?)(${unit})`, 'i')
+        : new RegExp(`(\\b${escRe(r.name).replace(/\\ /g, '\\s+')}\\b[^0-9\\n]{0,40}?)(-?[0-9]+(?:\\.[0-9]+)?)(${unit})`, 'i')
+      if (!r.unit && !r.symbol) return
+      out = out.replace(re, (whole, pre, num, post) => {
+        const n = Number(num)
+        const rel = Math.abs(n - r.value) / Math.abs(r.value || 1)
+        if (!(rel > NEAR_MIN && rel <= NEAR_MAX)) return whole
+        changes.push(`${r.name || r.symbol}: ${num} -> ${fmt(r.value)}`)
+        return `${pre}${fmt(r.value)}${post}`
+      })
+    })
+    return out
+  }
+  const fixed = parts.map((part, i) => (i % 2 === 1 ? part : part.split('\n').map(fixLine).join('\n'))).join('')
+  return { text: fixed, changes }
 }
