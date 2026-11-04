@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { sendPushToUser } from './_push.js'
 import { finalizeDrawings, drawingBlock, checkSpec } from '../src/drawingExtract.js'
 import { parseLoose } from '../src/jsonLoose.js'
-import { checkGraph } from '../src/graphCheck.js'
+import { checkGraph, reconcileValues } from '../src/graphCheck.js'
 import { getUserFromToken } from './_auth.js'
 import { verifiedFacts, auditArithmetic, arithmeticNote } from './_mathGuard.js'
 import { buildVisionMessages } from './_vision.js'
@@ -179,6 +179,16 @@ function reviewGraphs(text, question) {
     items.push({ spec: r.spec, problems: r.problems, fixes: r.fixes })
   }
   return { text: out + text.slice(last), items }
+}
+
+function graphSpecs(text) {
+  const out = []
+  const re = new RegExp(GRAPH_FENCE.source, 'g')
+  let m
+  while ((m = re.exec(text))) {
+    try { const sp = parseLoose(m[1]); if (sp && typeof sp === 'object') out.push(sp) } catch (e) { /* unreadable block: nothing to compare */ }
+  }
+  return out
 }
 
 function replaceGraphs(text, specs) {
@@ -1363,6 +1373,12 @@ ${closingLine}`
               trail.push('graph-retry:failed')
             }
           }
+        }
+        // A value written in the reply must agree with the same value worked out on the graph.
+        const rec = reconcileValues(text, graphSpecs(text))
+        if (rec.changes.length) {
+          text = rec.text
+          trail.push(`graph-values:${rec.changes.length} fixed`)
         }
       } catch (e) { console.error('Graph check failed:', e?.message) }
     }
