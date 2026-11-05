@@ -300,7 +300,18 @@ function readSpec(spec) {
   }
   const vlines = guide(spec.vlines, 'x', 'vlines')
   const hlines = guide(spec.hlines, 'y', 'hlines')
-  const lineSpecs = (Array.isArray(spec.lines) ? spec.lines : []).slice(0, LIMITS.lines)
+  // A point that the model wrote inside "lines" (for example the proof stress, where the offset line meets the curve)
+  // is moved to "points" instead of being dropped.
+  const rawLines = Array.isArray(spec.lines) ? spec.lines : []
+  const isPointLike = (L) => L && typeof L === 'object' && !L.fit && !L.from && !L.through && (L.at !== undefined || (L.series !== undefined && L.line !== undefined))
+  rawLines.filter(isPointLike).forEach((L) => {
+    const at = L.at !== undefined ? L.at : 'intersect'
+    const x = num(L.x)
+    const y = num(L.y)
+    pointSpecs.push({ i: pointSpecs.length, x, y, label: String(L.label ?? ''), series: L.series, at, line: L.line, hasXY: isNum(x) && isNum(y) })
+    fixes.push(`Moved "${String(L.label || 'a point').replace(/\{[^}]*\}/g, '').trim()}" from lines to points.`)
+  })
+  const lineSpecs = rawLines.filter((L) => !isPointLike(L)).slice(0, LIMITS.lines)
   if (Array.isArray(spec.lines) && spec.lines.length > LIMITS.lines) problems.push(`Only ${LIMITS.lines} reference lines can be drawn, but ${spec.lines.length} were given.`)
 
   Object.keys(spec).forEach((k) => { if (!KNOWN_KEYS.has(k)) problems.push(`The field "${k}" is not supported and would be ignored.`) })
@@ -956,7 +967,7 @@ export function renderGraph(spec, p, viewOverride) {
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" font-family="${FONT}">${body}</svg>`
   return {
-    svg, width: W, height: H, plot: { x: left, y: top, w: pw, h: ph }, view, notes: R.notes,
+    svg, width: W, height: H, plot: { x: left, y: top, w: pw, h: ph }, view, notes: R.notes.map((t) => String(t).replace(/\s*\{[^}]*\}/g, '').replace(/\s+/g, ' ').trim()),
     caption: describeGraph(R, view, shownLabels),
     problems: [...R.problems, ...renderProblems],
     fixes: R.fixes,

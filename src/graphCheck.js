@@ -91,10 +91,11 @@ export function checkGraph(spec, { question = '' } = {}) {
 // touched (between 1% and 10% off), so a different quantity on the same line,
 // for example "true stress at UTS", is left alone.
 // ---------------------------------------------------------------------------
-const NEAR_MIN = 0.01
 const NEAR_MAX = 0.10
+const STATES_MAX = 0.5
 const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const fmt = (v) => String(Number(Number(v).toPrecision(4)))
+const decimals = (t) => (String(t).split('.')[1] || '').length
+const E_NAME = "(?:Young['\\u2019]?s\\s+modulus|elastic\\s+modulus|modulus\\s+of\\s+elasticity)"
 
 function readingsFromGraph(spec) {
   const out = []
@@ -111,16 +112,35 @@ function readingsFromGraph(spec) {
     const m = String(l.rawLabel || '').match(/([A-Za-z][A-Za-z_]{0,3})\s*=\s*\{slope(?:\/([0-9.]+))?\}\s*([A-Za-z%\/]*)/)
     if (!m) return
     const div = m[2] ? Number(m[2]) : 1
-    out.push({ symbol: m[1], unit: m[3] || '', value: l.slope / div })
+    const value = l.slope / div
+    out.push({ symbol: m[1], unit: m[3] || '', value })
+    // "Young's modulus ... 198.8 GPa" in the text is the same quantity as "E = ..." on the graph
+    if (m[1] === 'E') out.push({ name: "Young's modulus", pattern: E_NAME, unit: m[3] || '', value })
   })
   return out
 }
+
+// Brackets and symbols may sit between a name and its number: "Proof stress (0.2% offset): 360 MPa".
+const GAP = '(?:\\([^)\\n]{0,30}\\)|\\u03c3[_0-9.]*|[^0-9\\n]){0,40}?'
+// The unit may be written plainly, in a table cell, or in LaTeX: "370.0 MPa", "| MPa", "\\text{ MPa}".
+const unitSrc = (u) => `(?:\\s|\\\\[,;!]|\\\\(?:text|mathrm|rm)\\s*\\{|[{|])*${escRe(u)}\\b`
 
 export function reconcileValues(text, specs) {
   const readings = (specs || []).flatMap(readingsFromGraph)
   if (!readings.length) return { text, changes: [] }
   const changes = []
   const NUM = '(-?[0-9]+(?:[ \\u202f,][0-9]{3})*(?:\\.[0-9]+)?)'
+  const clean = (t) => String(t).replace(/[ \u202f,]/g, '')
+  // A number is "the same" when the graph value, rounded the way the text rounds it, gives that number.
+  const decide = (numText, r, reach) => {
+    const c = clean(numText)
+    const n = Number(c)
+    const d = decimals(c)
+    if (Number(r.value.toFixed(d)) === n) return null
+    const rel = Math.abs(n - r.value) / Math.abs(r.value || 1)
+    if (rel > reach) return null
+    return r.value.toFixed(d)
+  }
   // never edit inside code blocks
   const parts = String(text).split(/(```[\s\S]*?```)/g)
   // A table row: "| Proof stress | 260 | MPa |". The number and its unit are in neighbouring cells.
@@ -130,16 +150,15 @@ export function reconcileValues(text, specs) {
     let changed = false
     readings.forEach((r) => {
       if (r.symbol || !r.unit) return
-      if (!new RegExp(`^\\s*[*_]*${escRe(r.name)}`, 'i').test(cells[1] || '')) return
+      if (!new RegExp(`^\\s*[*_]*${r.pattern || escRe(r.name)}`, 'i').test(cells[1] || '')) return
       for (let i = 2; i < cells.length - 1; i++) {
         if (cells[i + 1].trim().toLowerCase() !== r.unit.toLowerCase()) continue
         const m = cells[i].match(/^(\s*)(-?[0-9]+(?:[ \u202f,][0-9]{3})*(?:\.[0-9]+)?)(\s*)$/)
         if (!m) continue
-        const n = Number(m[2].replace(/[ \u202f,]/g, ''))
-        const rel = Math.abs(n - r.value) / Math.abs(r.value || 1)
-        if (rel > NEAR_MIN && rel <= 0.5) {
-          cells[i] = `${m[1]}${fmt(r.value)}${m[3]}`
-          changes.push(`${r.name}: ${n} -> ${fmt(r.value)}`)
+        const fixedNum = decide(m[2], r, STATES_MAX)
+        if (fixedNum !== null) {
+          cells[i] = `${m[1]}${fixedNum}${m[3]}`
+          changes.push(`${r.name}: ${clean(m[2])} -> ${fixedNum}`)
           changed = true
         }
         break
@@ -148,25 +167,24 @@ export function reconcileValues(text, specs) {
     return changed ? cells.join('|') : line
   }
   const fixLine = (line) => {
-    if (line.length > 260) return line
+    if (line.length > 300) return line
     if (/^\s*\|/.test(line)) return fixRow(line)
     let out = line
     readings.forEach((r) => {
       if (!r.unit && !r.symbol) return
-      const unit = r.unit ? `\\s*\\|?\\s*${escRe(r.unit)}\\b` : ''
-      const nameRe = r.symbol ? null : escRe(r.name)
+      const unit = r.unit ? unitSrc(r.unit) : ''
+      const nameRe = r.pattern || (r.symbol ? null : escRe(r.name))
       const re = r.symbol
-        ? new RegExp(`(\\b${escRe(r.symbol)}\\s*(?:=|\\u2248|~)\\s*)${NUM}(${unit})`, 'i')
-        : new RegExp(`(\\b${nameRe}\\b(?:\\([^)\\n]{0,30}\\)|\\u03c3[_0-9.]*|[^0-9\\n]){0,40}?)${NUM}(${unit})`, 'i')
-      // A line (or table row) that begins by naming the quantity states that quantity, so a bigger miss is also a miss.
+        ? new RegExp(`(\\b${escRe(r.symbol)}\\s*(?:=|\\u2248|~)\\s*\\$?\\s*)${NUM}(${unit})`, 'i')
+        : new RegExp(`(\\b${nameRe}\\b${GAP})${NUM}(${unit})`, 'i')
+      // A line that begins by naming the quantity states that quantity, so a bigger miss is also a miss.
       const states = !r.symbol && new RegExp(`^[\\s|>*#_.)(0-9%-]*${nameRe}`, 'i').test(out)
-      const reach = states ? 0.5 : NEAR_MAX
+      const reach = states ? STATES_MAX : NEAR_MAX
       out = out.replace(re, (whole, pre, num, post) => {
-        const n = Number(String(num).replace(/[ \u202f,]/g, ''))
-        const rel = Math.abs(n - r.value) / Math.abs(r.value || 1)
-        if (!(rel > NEAR_MIN && rel <= reach)) return whole
-        changes.push(`${r.name || r.symbol}: ${n} -> ${fmt(r.value)}`)
-        return `${pre}${fmt(r.value)}${post}`
+        const fixedNum = decide(num, r, reach)
+        if (fixedNum === null) return whole
+        changes.push(`${r.name || r.symbol}: ${clean(num)} -> ${fixedNum}`)
+        return `${pre}${fixedNum}${post}`
       })
     })
     return out
