@@ -120,22 +120,52 @@ export function reconcileValues(text, specs) {
   const readings = (specs || []).flatMap(readingsFromGraph)
   if (!readings.length) return { text, changes: [] }
   const changes = []
+  const NUM = '(-?[0-9]+(?:[ \\u202f,][0-9]{3})*(?:\\.[0-9]+)?)'
   // never edit inside code blocks
   const parts = String(text).split(/(```[\s\S]*?```)/g)
+  // A table row: "| Proof stress | 260 | MPa |". The number and its unit are in neighbouring cells.
+  const fixRow = (line) => {
+    const cells = line.split('|')
+    if (cells.length < 4) return line
+    let changed = false
+    readings.forEach((r) => {
+      if (r.symbol || !r.unit) return
+      if (!new RegExp(`^\\s*[*_]*${escRe(r.name)}`, 'i').test(cells[1] || '')) return
+      for (let i = 2; i < cells.length - 1; i++) {
+        if (cells[i + 1].trim().toLowerCase() !== r.unit.toLowerCase()) continue
+        const m = cells[i].match(/^(\s*)(-?[0-9]+(?:[ \u202f,][0-9]{3})*(?:\.[0-9]+)?)(\s*)$/)
+        if (!m) continue
+        const n = Number(m[2].replace(/[ \u202f,]/g, ''))
+        const rel = Math.abs(n - r.value) / Math.abs(r.value || 1)
+        if (rel > NEAR_MIN && rel <= 0.5) {
+          cells[i] = `${m[1]}${fmt(r.value)}${m[3]}`
+          changes.push(`${r.name}: ${n} -> ${fmt(r.value)}`)
+          changed = true
+        }
+        break
+      }
+    })
+    return changed ? cells.join('|') : line
+  }
   const fixLine = (line) => {
     if (line.length > 260) return line
+    if (/^\s*\|/.test(line)) return fixRow(line)
     let out = line
     readings.forEach((r) => {
-      const unit = r.unit ? `\\s*${escRe(r.unit)}\\b` : ''
-      const re = r.symbol
-        ? new RegExp(`(\\b${escRe(r.symbol)}\\s*(?:=|\\u2248|~)\\s*)(-?[0-9]+(?:\\.[0-9]+)?)(${unit})`, 'i')
-        : new RegExp(`(\\b${escRe(r.name).replace(/\\ /g, '\\s+')}\\b[^0-9\\n]{0,40}?)(-?[0-9]+(?:\\.[0-9]+)?)(${unit})`, 'i')
       if (!r.unit && !r.symbol) return
+      const unit = r.unit ? `\\s*\\|?\\s*${escRe(r.unit)}\\b` : ''
+      const nameRe = r.symbol ? null : escRe(r.name)
+      const re = r.symbol
+        ? new RegExp(`(\\b${escRe(r.symbol)}\\s*(?:=|\\u2248|~)\\s*)${NUM}(${unit})`, 'i')
+        : new RegExp(`(\\b${nameRe}\\b[^0-9\\n]{0,40}?)${NUM}(${unit})`, 'i')
+      // A line (or table row) that begins by naming the quantity states that quantity, so a bigger miss is also a miss.
+      const states = !r.symbol && new RegExp(`^[\\s|>*#_.)(0-9%-]*${nameRe}`, 'i').test(out)
+      const reach = states ? 0.5 : NEAR_MAX
       out = out.replace(re, (whole, pre, num, post) => {
-        const n = Number(num)
+        const n = Number(String(num).replace(/[ \u202f,]/g, ''))
         const rel = Math.abs(n - r.value) / Math.abs(r.value || 1)
-        if (!(rel > NEAR_MIN && rel <= NEAR_MAX)) return whole
-        changes.push(`${r.name || r.symbol}: ${num} -> ${fmt(r.value)}`)
+        if (!(rel > NEAR_MIN && rel <= reach)) return whole
+        changes.push(`${r.name || r.symbol}: ${n} -> ${fmt(r.value)}`)
         return `${pre}${fmt(r.value)}${post}`
       })
     })
@@ -143,4 +173,36 @@ export function reconcileValues(text, specs) {
   }
   const fixed = parts.map((part, i) => (i % 2 === 1 ? part : part.split('\n').map(fixLine).join('\n'))).join('')
   return { text: fixed, changes }
+}
+
+// ---------------------------------------------------------------------------
+// Missing plots. A question that asks for "Plot A" and "Plot B" needs two graph
+// blocks. A reply with fewer has silently dropped a plot.
+// ---------------------------------------------------------------------------
+export function requiredPlots(question) {
+  const found = new Set(((String(question || '').match(/\bplots?\s+([A-D])\b/gi)) || []).map((m) => m.trim().slice(-1).toUpperCase()))
+  return found.size >= 2 ? [...found].sort() : []
+}
+
+// Puts one graph block under each "Plot X" heading of the reply (existing blocks are replaced).
+export function placePlots(text, specs, letters) {
+  const stripped = String(text).replace(/\n*```graph[^\n]*\n[\s\S]*?```[ \t]*\n*/g, '\n\n')
+  const block = (sp) => '```graph\n' + JSON.stringify(sp) + '\n```'
+  const placed = new Set()
+  const out = []
+  let inFence = false
+  stripped.split('\n').forEach((line) => {
+    if (/^\s*```/.test(line)) inFence = !inFence
+    out.push(line)
+    if (inFence) return
+    const m = line.match(/^[\s#>*_-]*plot\s+([A-D])\b/i)
+    if (!m) return
+    const i = letters.indexOf(m[1].toUpperCase())
+    if (i < 0 || placed.has(i) || !specs[i]) return
+    placed.add(i)
+    out.push('', block(specs[i]), '')
+  })
+  let result = out.join('\n').replace(/\n{3,}/g, '\n\n')
+  specs.forEach((sp, i) => { if (sp && !placed.has(i)) result = result.trimEnd() + '\n\n' + block(sp) + '\n' })
+  return result
 }
