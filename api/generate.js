@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { sendPushToUser } from './_push.js'
 import { finalizeDrawings, drawingBlock, checkSpec } from '../src/drawingExtract.js'
 import { parseLoose } from '../src/jsonLoose.js'
-import { checkGraph, reconcileValues } from '../src/graphCheck.js'
+import { checkGraph, reconcileValues, requiredPlots, placePlots } from '../src/graphCheck.js'
 import { getUserFromToken } from './_auth.js'
 import { verifiedFacts, auditArithmetic, arithmeticNote } from './_mathGuard.js'
 import { buildVisionMessages } from './_vision.js'
@@ -199,12 +199,16 @@ function replaceGraphs(text, specs) {
   })
 }
 
-async function aiGraphFix({ models, question, items, deadline }) {
+async function aiGraphFix({ models, question, items, deadline, need = items.length, letters = [] }) {
   try {
     const key = process.env.GEMINI_API_KEY
     if (!key || !Array.isArray(models) || !models.length) return null
     const listing = items.map((it, i) => `GRAPH ${i + 1}${it.problems.length ? ' (HAS PROBLEMS)' : ' (OK, return it unchanged)'}:\n${JSON.stringify(it.spec)}${it.problems.length ? '\nPROBLEMS:\n- ' + it.problems.join('\n- ') : ''}`).join('\n\n')
-    const prompt = `${GRAPH_SPEC_HELP}\n\nIGNORE the instructions above about code fences and about writing text. Your whole reply must be ONE raw JSON object {"graphs":[...]} holding the corrected spec of EVERY graph below, in the same order. Keep everything that is already right and fix only the listed problems. Use exactly the numbers already in the specs and in the question; never invent data.\n\nSTUDENT'S QUESTION:\n${String(question || '').slice(0, 3500)}\n\n${listing}`
+    const missing = need > items.length
+    const task = missing
+      ? `The question asks for ${need} plots (${letters.map((l) => 'Plot ' + l).join(', ')}) but the reply drew only ${items.length}. Your whole reply must be ONE raw JSON object {"graphs":[...]} with exactly ${need} complete specs, in the order ${letters.map((l) => 'Plot ' + l).join(', ')}, each following that plot's requirements in the question. The drafts below may be wrong or incomplete; reuse what is right.`
+      : 'Your whole reply must be ONE raw JSON object {"graphs":[...]} holding the corrected spec of EVERY graph below, in the same order. Keep everything that is already right and fix only the listed problems.'
+    const prompt = `${GRAPH_SPEC_HELP}\n\nIGNORE the instructions above about code fences and about writing text. ${task} Use exactly the numbers already in the specs and in the question; never invent data.\n\nSTUDENT'S QUESTION:\n${String(question || '').slice(0, 3500)}\n\n${listing || '(no graphs were drawn)'}`
     for (const model of models.slice(0, 2)) {
       const left = deadline - Date.now() - 2500
       if (left < 5000) break
@@ -223,7 +227,7 @@ async function aiGraphFix({ models, question, items, deadline }) {
         const raw = (data?.candidates?.[0]?.content?.parts || []).filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
         const parsed = parseLoose(raw)
         const graphs = Array.isArray(parsed) ? parsed : parsed && parsed.graphs
-        if (!Array.isArray(graphs) || graphs.length !== items.length) { console.error('Graph fix returned the wrong shape'); continue }
+        if (!Array.isArray(graphs) || graphs.length !== need) { console.error('Graph fix returned the wrong shape'); continue }
         return graphs.map((g) => (g && typeof g === 'object' ? checkGraph(g, { question }) : null))
       } catch (e) {
         console.error('Graph fix error:', model, e?.message)
@@ -963,6 +967,10 @@ ${closingLine}`
 
   let bestPartial = ''
   const FIRST_TOKEN_MS = Number(process.env.FIRST_TOKEN_MS) || 9000
+  // Heavy questions (maths, graphs, photos) need the main model to think for a while before its
+  // first word. It gets longer; the backups keep the short wait. Set FIRST_TOKEN_PRIMARY_MS in Vercel to change it.
+  const FIRST_TOKEN_PRIMARY_MS = Number(process.env.FIRST_TOKEN_PRIMARY_MS) || 18000
+  const heavyRequest = effTool === 'graph' || mode === 'calculative' || hasFiles
 
   // Reasoning models on Groq accept an effort setting; keep it low so replies stay fast.
   const extraBody = (provider) => (provider.name === 'groq' && /gpt-oss/.test(provider.model) ? { reasoning_effort: 'low' } : {})
@@ -1051,7 +1059,7 @@ ${closingLine}`
     const ac = new AbortController()
     const budget = Math.max(4000, Math.min(45000, DEADLINE - Date.now() - 1500))
     const overall = setTimeout(() => ac.abort(), budget)
-    let timer = setTimeout(() => ac.abort(), FIRST_TOKEN_MS)
+    let timer = setTimeout(() => ac.abort(), heavyRequest && model === GEMINI_MODELS[0] ? FIRST_TOKEN_PRIMARY_MS : FIRST_TOKEN_MS)
     const touch = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), IDLE_MS) }
     try {
       return await tryGeminiStreamInner(model, ac, touch)
@@ -1250,8 +1258,15 @@ ${closingLine}`
     let sawRateLimit = false
     let sawOverload = false
 
+    let geminiSilent = 0
+    let skippedGemini = false
     for (const attempt of attempts) {
       if (DEADLINE - Date.now() < 5000) { trail.push('out of time'); break }
+      // Two models in a row that never said a word means Gemini is slow right now: go straight to the backups.
+      if (attempt.label.startsWith('gemini:') && geminiSilent >= 2) {
+        if (!skippedGemini) { trail.push('gemini skipped'); skippedGemini = true }
+        continue
+      }
       const maxTries = attempt.retryOnBusy ? 2 : 1
       for (let i = 0; i < maxTries && text === null; i++) {
         let result
@@ -1268,7 +1283,9 @@ ${closingLine}`
         } catch (e) {
           console.error(`Provider ${attempt.label} threw:`, e?.message)
           const ranFor = ((Date.now() - attemptStartAt) / 1000).toFixed(1)
-          trail.push(`${attempt.label.replace('gemini:gemini-', 'g')}=${e?.name === 'AbortError' || /abort/i.test(e?.message || '') ? 'silent' : 'error'} ${ranFor}s`)
+          const silent = e?.name === 'AbortError' || /abort/i.test(e?.message || '')
+          if (attempt.label.startsWith('gemini:')) geminiSilent = silent ? geminiSilent + 1 : 0
+          trail.push(`${attempt.label.replace('gemini:gemini-', 'g')}=${silent ? 'silent' : 'error'} ${ranFor}s`)
           break
         }
         if (result.ok) {
@@ -1357,11 +1374,19 @@ ${closingLine}`
         const rv = reviewGraphs(text, guardQuestion)
         text = rv.text
         const bad = rv.items.filter((it) => it.problems.length)
-        if (bad.length) {
-          trail.push(`graph:${bad.reduce((n, it) => n + it.problems.length, 0)} problem(s)`)
+        const letters = requiredPlots(guardQuestion)
+        const missingPlots = letters.length > rv.items.length
+        if (bad.length || missingPlots) {
+          trail.push(`graph:${bad.reduce((n, it) => n + it.problems.length, 0)} problem(s)${missingPlots ? `, ${letters.length - rv.items.length} plot(s) missing` : ''}`)
           if (!rv.items.some((it) => it.skipped) && DEADLINE - Date.now() > 16000) {
-            const fixedItems = await aiGraphFix({ models: GEMINI_MODELS, question: guardQuestion, items: rv.items, deadline: DEADLINE })
-            if (fixedItems) {
+            const fixedItems = await aiGraphFix({ models: GEMINI_MODELS, question: guardQuestion, items: rv.items, deadline: DEADLINE, need: missingPlots ? letters.length : rv.items.length, letters })
+            if (fixedItems && missingPlots) {
+              if (fixedItems.every((f) => f)) {
+                text = placePlots(text, fixedItems.map((f) => f.spec), letters)
+                const left = fixedItems.reduce((n, f) => n + f.problems.length, 0)
+                trail.push(left ? `graph-retry:plots added, ${left} left` : 'graph-retry:plots added')
+              } else trail.push('graph-retry:failed')
+            } else if (fixedItems) {
               const better = rv.items.map((old, i) => {
                 const nw = fixedItems[i]
                 return old.problems.length && nw && nw.problems.length < old.problems.length ? nw.spec : null
