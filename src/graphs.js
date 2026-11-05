@@ -677,9 +677,35 @@ export function renderGraph(spec, p, viewOverride) {
   const { R, view } = resolveGraph(spec, { view: viewOverride })
   const W = 380
   const colors = CURVE_COLORS(p)
-  const curveColor = (c, i) => pickColor(c.color, colors[i % colors.length], p)
-  const seriesColor = (s, i) => pickColor(s.color, colors[(R.curves.length + i) % colors.length], p)
-  const lineColor = (l, i) => pickColor(l.color, colors[(R.curves.length + R.series.length + i) % colors.length], p)
+  // Every curve, series and line gets its own colour. A colour that is already taken (for example "red"
+  // on a theme whose main colour is red) is swapped for the next free one, so two lines are never confused.
+  const hexRgb = (c) => {
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})/i.exec(String(c || ''))
+    if (!m) return null
+    const h = m[1].length === 3 ? m[1].split('').map((x) => x + x).join('') : m[1]
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16))
+  }
+  const sameColor = (a, b) => {
+    if (!a || !b) return false
+    if (String(a).toLowerCase() === String(b).toLowerCase()) return true
+    const x = hexRgb(a)
+    const y = hexRgb(b)
+    return !!(x && y && Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) < 70)
+  }
+  const palette = [...colors, '#4aa3ff', '#e8a33d', '#a678f5', '#2fbf9b', '#e5645b']
+  const usedColors = []
+  const takeColor = (wanted) => {
+    let c = wanted && !usedColors.some((u) => sameColor(u, wanted)) ? wanted : null
+    if (!c) c = palette.find((pc) => !usedColors.some((u) => sameColor(u, pc))) || wanted || palette[usedColors.length % palette.length]
+    usedColors.push(c)
+    return c
+  }
+  const curveCols = R.curves.map((c) => takeColor(pickColor(c.color, null, p)))
+  const seriesCols = R.series.map((s) => takeColor(pickColor(s.color, null, p)))
+  const lineCols = R.lines.map((l) => takeColor(pickColor(l.color, null, p)))
+  const curveColor = (c, i) => curveCols[i]
+  const seriesColor = (s, i) => seriesCols[i]
+  const lineColor = (l, i) => lineCols[i]
   const legend = []
   const renderProblems = []
 

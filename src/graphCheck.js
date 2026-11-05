@@ -157,7 +157,7 @@ export function reconcileValues(text, specs) {
       const nameRe = r.symbol ? null : escRe(r.name)
       const re = r.symbol
         ? new RegExp(`(\\b${escRe(r.symbol)}\\s*(?:=|\\u2248|~)\\s*)${NUM}(${unit})`, 'i')
-        : new RegExp(`(\\b${nameRe}\\b[^0-9\\n]{0,40}?)${NUM}(${unit})`, 'i')
+        : new RegExp(`(\\b${nameRe}\\b(?:\\([^)\\n]{0,30}\\)|\\u03c3[_0-9.]*|[^0-9\\n]){0,40}?)${NUM}(${unit})`, 'i')
       // A line (or table row) that begins by naming the quantity states that quantity, so a bigger miss is also a miss.
       const states = !r.symbol && new RegExp(`^[\\s|>*#_.)(0-9%-]*${nameRe}`, 'i').test(out)
       const reach = states ? 0.5 : NEAR_MAX
