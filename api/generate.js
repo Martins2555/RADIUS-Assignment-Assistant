@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { createHmac, timingSafeEqual } from 'crypto'
 import { sendPushToUser } from './_push.js'
 import { finalizeDrawings, drawingBlock, checkSpec } from '../src/drawingExtract.js'
 import { parseLoose } from '../src/jsonLoose.js'
@@ -513,7 +514,15 @@ export default async function handler(req, res) {
     process.env.VITE_SUPABASE_ANON_KEY,
     { global: { headers: { Authorization: `Bearer ${token}` } } }
   )
-  const rlPromise = Promise.resolve(supabaseAsUser.rpc('rl_check', { p_limit: 20, p_window_minutes: 60 }))
+  // A long answer that ran out of time is finished by a second request that continues it.
+  // That request is part of the same message: it is not counted again (see below).
+  const contBody = req.body && typeof req.body.continueFrom === 'string' && req.body.continueFrom.length >= 200 && req.body.continueFrom.length <= 90000 ? req.body : null
+  const isContinuation = !!contBody
+  const rlPromise = Promise.resolve(
+    isContinuation
+      ? supabaseAsUser.from('profiles').select('user_id').limit(1) // a harmless read that still proves the database accepts this login
+      : supabaseAsUser.rpc('rl_check', { p_limit: 20, p_window_minutes: 60 })
+  )
   const { user: authedUser, error: authError, via: authVia } = await getUserFromToken(supabaseAuth, token, rlPromise)
   const userData = { user: authedUser }
   if (!authedUser) {
@@ -530,6 +539,27 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Invalid or expired session' + dbg })
   }
   if (authVia === 'token') console.error('Auth server check failed, accepted a valid signed token instead:', authError?.message, authError?.status)
+
+  // Continuation proof: the server signs every partial answer it hands out, so a student cannot
+  // fake one to get free replies. Valid for 15 minutes, for the same login only.
+  const CONT_SECRET = process.env.CONT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.GEMINI_API_KEY || ''
+  const signCont = (userId, part, ts, partial) => createHmac('sha256', CONT_SECRET).update(`${userId}|${part}|${ts}|${partial}`).digest('hex')
+  let verifiedCont = null
+  if (isContinuation) {
+    const part = Number(contBody.contPart)
+    const ts = Number(contBody.contTs)
+    const sig = String(contBody.contSig || '')
+    let good = false
+    try {
+      if (CONT_SECRET && Number.isInteger(part) && part >= 1 && part <= 4 && Number.isFinite(ts) && Date.now() - ts < 15 * 60 * 1000 && Date.now() - ts > -60000) {
+        const want = Buffer.from(signCont(authedUser.id, part, ts, contBody.continueFrom))
+        const got = Buffer.from(sig)
+        good = want.length === got.length && timingSafeEqual(want, got)
+      }
+    } catch (e) { good = false }
+    if (!good) return res.status(400).json({ error: 'This continuation is not valid. Please tap Retry.' })
+    verifiedCont = { partial: contBody.continueFrom, part }
+  }
 
   // Saves one row about this request. Never throws, never waits more than 0.8s,
   // and does nothing harmful if the table has not been created yet.
@@ -568,7 +598,11 @@ export default async function handler(req, res) {
   // not been run yet, the old check_rate_limit() is used instead.
   let usingRefundableLimit = true
   let { data: rateLimitOk, error: rateLimitError } = await rlPromise
-  if (rateLimitError) {
+  if (isContinuation) {
+    usingRefundableLimit = false
+    rateLimitOk = true
+    rateLimitError = null
+  } else if (rateLimitError) {
     usingRefundableLimit = false
     ;({ data: rateLimitOk, error: rateLimitError } = await supabaseAsUser.rpc('check_rate_limit', {
       p_limit: 20,
@@ -598,7 +632,7 @@ export default async function handler(req, res) {
   // Fails open if the SQL has not been run yet, so a missing migration cannot
   // take the whole app down.
   try {
-    const { data: access, error: accessError } = await supabaseAsUser.rpc('consume_message')
+    const { data: access, error: accessError } = isContinuation ? { data: null, error: null } : await supabaseAsUser.rpc('consume_message')
     if (accessError) {
       console.error('Access check errored (failing open):', accessError.message)
     } else if (access && access.allowed === false) {
@@ -841,7 +875,9 @@ ${closingLine}`
   // limit), the text already shown to the student is kept in `carry` and the
   // next provider is asked to CONTINUE from there, instead of starting over
   // or leaving a cut-off answer.
-  let carry = ''
+  let carry = verifiedCont ? verifiedCont.partial : ''
+  const contPart = verifiedCont ? verifiedCont.part : 0
+  let budgetHit = false // the time budget of this request ran out while the answer was still being written
   const DEADLINE = Date.now() + 52000 // Vercel stops the function at 60s
   const CONTINUE_NOTE =
     'Continue your previous reply exactly where it stopped, in the same format. Do not repeat anything already written, do not start over, do not write the [TYPE:...] tag again, and do not add a heading such as "continued". Write all maths only with $...$ and $$...$$. Finish any equation, table or code block that was left open.'
@@ -877,6 +913,11 @@ ${closingLine}`
     .map((m) => m.trim())
     .filter(Boolean)
 
+  // Long questions (a few pages of text or several photos) need a longer answer than the normal limit.
+  // The bigger limit is only a ceiling: short answers still stop as soon as they are finished, so
+  // nothing gets slower for normal questions.
+  const bigJob = String(assignmentText || '').length > 2500 || imageList.length >= 3 || (hasFiles && mode === 'calculative')
+  const OUT_TOKENS = bigJob ? 16384 : 8192
   const geminiBodyGemini3 = JSON.stringify({
     system_instruction: { parts: [{ text: systemInstruction }] },
     contents,
@@ -885,7 +926,7 @@ ${closingLine}`
     // non-calculative mode, so 'low' is used everywhere.
     generationConfig: {
       thinkingConfig: { thinkingLevel: 'low' },
-      maxOutputTokens: 8192,
+      maxOutputTokens: OUT_TOKENS,
     },
   })
   // Gemini 2.5 does not accept thinkingLevel, so it gets the same request without it.
@@ -965,7 +1006,7 @@ ${closingLine}`
     return res.status(status).json({ error: message })
   }
 
-  let bestPartial = ''
+  let bestPartial = carry
   const FIRST_TOKEN_MS = Number(process.env.FIRST_TOKEN_MS) || 9000
   // Heavy questions (maths, graphs, photos) need the main model to think for a while before its
   // first word. It gets longer; the backups keep the short wait. Set FIRST_TOKEN_PRIMARY_MS in Vercel to change it.
@@ -1058,7 +1099,7 @@ ${closingLine}`
     // words keep arriving.
     const ac = new AbortController()
     const budget = Math.max(4000, Math.min(45000, DEADLINE - Date.now() - 1500))
-    const overall = setTimeout(() => ac.abort(), budget)
+    const overall = setTimeout(() => { budgetHit = true; ac.abort() }, budget)
     let timer = setTimeout(() => ac.abort(), heavyRequest && model === GEMINI_MODELS[0] ? FIRST_TOKEN_PRIMARY_MS : FIRST_TOKEN_MS)
     const touch = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), IDLE_MS) }
     try {
@@ -1132,7 +1173,7 @@ ${closingLine}`
     prepareCarry()
     const ac = new AbortController()
     const budget = Math.max(4000, Math.min(45000, DEADLINE - Date.now() - 1500))
-    const overall = setTimeout(() => ac.abort(), budget)
+    const overall = setTimeout(() => { budgetHit = true; ac.abort() }, budget)
     let timer = setTimeout(() => ac.abort(), 8000)
     const touch = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), IDLE_MS) }
     try {
@@ -1143,7 +1184,7 @@ ${closingLine}`
       const response = await fetch(provider.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env[provider.keyEnv]}` },
-        body: JSON.stringify({ model: provider.model, messages, max_tokens: 4096, stream: true, ...extraBody(provider) }),
+        body: JSON.stringify({ model: provider.model, messages, max_tokens: bigJob ? 8192 : 4096, stream: true, ...extraBody(provider) }),
         signal: ac.signal,
       })
       if (!response.ok) {
@@ -1201,7 +1242,7 @@ ${closingLine}`
       body: JSON.stringify({
         model: provider.model,
         messages: provider.messages || chatMessages,
-        max_tokens: 4096,
+        max_tokens: bigJob ? 8192 : 4096,
         ...extraBody(provider),
       }),
       signal: AbortSignal.timeout(20000),
@@ -1255,6 +1296,7 @@ ${closingLine}`
 
   try {
     let text = null
+    let moreNeeded = false
     let sawRateLimit = false
     let sawOverload = false
 
@@ -1276,6 +1318,7 @@ ${closingLine}`
             needsReset = false
             carry = ''
           }
+          budgetHit = false
           attemptStartAt = Date.now()
           if (!firstAttemptAt) firstAttemptAt = attemptStartAt
           chunkAt = 0
@@ -1306,6 +1349,20 @@ ${closingLine}`
         break
       }
       if (text !== null) break
+      // The time budget ran out while a good answer was being written: do not start another model
+      // for a few seconds, finish the answer in a new request instead (below).
+      if (budgetHit && carry.length >= 200) { moreNeeded = true; break }
+    }
+
+    if (text === null && moreNeeded && wantStream && !clientGone && contPart < 4) {
+      const part = contPart + 1
+      const ts = Date.now()
+      trail.push(`continue:${part}`)
+      wasPartial = true
+      await logRequest({ status: 'partial', provider: servedBy || null, attempts: trail.join(', ').slice(0, 400), reply_chars: carry.length, first_token_ms: firstTokenAt ? firstTokenAt - t0 : null, ...timingFields() })
+      emit({ t: 'more', partial: carry, part, ts, sig: signCont(authedUser.id, part, ts, carry) })
+      res.end()
+      return
     }
 
     if (text === null && (bestPartial || carry)) {
