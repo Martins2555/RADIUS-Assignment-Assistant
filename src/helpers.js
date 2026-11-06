@@ -1,15 +1,18 @@
 import { fixText } from './textFix.js'
 import { normalizeDrawings, stripDiagrams } from './DiagramBlock.jsx'
+import { tidyStreaming } from './streamClean.js'
 
 // While a reply is streaming in, hide the hidden type tag at the start and the
 // Study Pack JSON block at the end so the student never sees them flash by.
-export function cleanStreamText(raw) {
+export function cleanStreamText(raw, live = false) {
   let t = raw || ''
   t = t.replace(/^\s*\[TYPE:(ASSIGNMENT|GENERAL)\]\s*/i, '')
   if (/^\s*\[[A-Za-z:]*$/.test(t)) return ''
   const idx = t.indexOf('<study_data>')
   if (idx !== -1) t = t.slice(0, idx)
   else t = t.replace(/<[a-z_]{0,11}$/, '')
+  // Live preview only: hide drawing code and unfinished formulas until the checked reply replaces it.
+  if (live) t = tidyStreaming(t)
   return t.trim() ? t : ''
 }
 

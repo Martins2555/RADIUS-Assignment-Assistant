@@ -658,6 +658,8 @@ function Dashboard({ session }) {
 
     const streamId = `temp-a-${Date.now()}`
     let streamText = ''
+    let waitingMore = false // between two parts of a very long answer
+    let roundNo = 0 // 0 = first request, 1 and up = continuation requests of a very long answer
     let placeholderAdded = false
     // Re-rendering markdown + maths on every tiny chunk makes long replies
     // lag on phones. Updates are batched to at most one per screen frame.
@@ -692,6 +694,7 @@ function Dashboard({ session }) {
 
     const finish = async (result, responseType) => {
       closeStream()
+      setStatusNote('')
       const stored = kind ? `<!--KIND:${kind}-->\n${result}` : result
       if (placeholderAdded) {
         setMessages((prev) => prev.map((m) => (m.id === streamId ? { ...m, content: stored, responseType, fresh: true } : m)))
@@ -725,7 +728,7 @@ function Dashboard({ session }) {
     }
 
     try {
-      const sendGenerate = (accessToken) => fetch('/api/generate', {
+      const sendGenerate = (accessToken, extra) => fetch('/api/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -746,6 +749,7 @@ function Dashboard({ session }) {
           conversationId,
           kind: kind || undefined,
           replaceLast: !!replaceId,
+          ...(extra || {}),
         }),
         signal: controller.signal,
       })
@@ -756,12 +760,20 @@ function Dashboard({ session }) {
         const { data: cur } = await supabase.auth.getSession()
         if (cur && cur.session && cur.session.access_token) accessToken = cur.session.access_token
       } catch (e) { /* fall back to the token we have */ }
-      let response = await sendGenerate(accessToken)
+      // A very long answer can run out of time on the server. The server then sends a signed
+      // 'more' event, and the app asks for the rest right away, so the student just sees one
+      // answer that keeps growing. Up to 4 extra rounds.
+      let moreInfo = null
+      let extra = null
+      for (let round = 0; round < 5; round++) {
+      roundNo = round
+      moreInfo = null
+      let response = await sendGenerate(accessToken, extra)
       if (response.status === 401) {
         // Expired anyway: refresh once and try again before showing an error.
         try {
           const { data: ref } = await supabase.auth.refreshSession()
-          if (ref && ref.session && ref.session.access_token) response = await sendGenerate(ref.session.access_token)
+          if (ref && ref.session && ref.session.access_token) response = await sendGenerate(ref.session.access_token, extra)
         } catch (e) { /* the error below explains it */ }
         if (response.status === 401) {
           // The login really is finished. Send the student to the login page
@@ -794,8 +806,9 @@ function Dashboard({ session }) {
           let ev
           try { ev = JSON.parse(line) } catch (e) { return }
           if (ev.t === 'delta') {
+            if (waitingMore) { waitingMore = false; setStatusNote(''); setStreaming(true) }
             streamText += ev.text
-            const shown = cleanStreamText(streamText)
+            const shown = cleanStreamText(streamText, true)
             if (!shown) return
             if (!placeholderAdded) {
               placeholderAdded = true
@@ -809,6 +822,8 @@ function Dashboard({ session }) {
             streamText = ''
             removePlaceholder()
             setStreaming(false)
+          } else if (ev.t === 'more') {
+            moreInfo = { partial: ev.partial, part: ev.part, ts: ev.ts, sig: ev.sig }
           } else if (ev.t === 'done') {
             finalResult = ev.result
             finalType = ev.responseType || 'general'
@@ -829,11 +844,35 @@ function Dashboard({ session }) {
         if (buffer.trim()) handleEvent(buffer)
 
         if (streamError) throw new Error(streamError)
+        if (moreInfo && finalResult === null) {
+          // Keep what is on screen, then ask for the next part.
+          streamText = moreInfo.partial
+          extra = { continueFrom: moreInfo.partial, contPart: moreInfo.part, contTs: moreInfo.ts, contSig: moreInfo.sig }
+          setStatusNote('Still writing...')
+          waitingMore = true
+          setStreaming(false)
+          continue
+        }
         if (finalResult === null) throw new Error('The reply was cut off. Tap Retry to try again.')
         await finish(finalResult, finalType)
       }
+      break
+      }
     } catch (err) {
       closeStream()
+      // A later part of a very long answer failed: keep the part that was already written
+      // instead of throwing it away.
+      if (roundNo > 0 && (err.name !== 'AbortError' || stalled) && cleanStreamText(streamText).length > 200) {
+        try {
+          await finish(cleanStreamText(streamText) + '\n\n_This reply was cut off. Tap Regenerate to get the full answer._', 'assignment')
+        } catch (e) { /* best-effort */ }
+        clearInterval(watchdog)
+        abortControllerRef.current = null
+        setStatusNote('')
+        setStreaming(false)
+        setLoading(false)
+        return
+      }
       const looksLikeDrop = err instanceof TypeError || /cut off|network|load failed|failed to fetch/i.test(err.message || '')
       if (err.name === 'AbortError' && !stalled) {
         // The student pressed stop: the screen already reacted instantly (see
