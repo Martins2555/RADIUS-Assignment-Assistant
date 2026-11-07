@@ -6,7 +6,7 @@
 
 const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
 
-export const DIAGRAM_TYPES = ['miller_plane', 'fbd', 'beam', 'circuit', 'lens']
+export const DIAGRAM_TYPES = ['miller_plane', 'fbd', 'beam', 'circuit', 'lens', 'wave', 'projectile', 'mirror', 'sketch', 'flow']
 
 const num = (v, d = 0) => {
   const n = Number(v)
@@ -613,6 +613,570 @@ function lens(spec, p) {
 }
 
 // ---------------------------------------------------------------------------
+// 6. Waves: transverse (crest, trough, amplitude, wavelength), longitudinal
+//    (compressions and rarefactions) and standing waves (nodes and antinodes).
+//    Every curve is computed point by point, so it is a true smooth sine curve,
+//    and every label sits on the exact point it names.
+// ---------------------------------------------------------------------------
+function wave(spec, p) {
+  const kindRaw = String(spec.kind || spec.wave || spec.waveType || 'transverse').toLowerCase()
+  const kind = /long|compress|sound/.test(kindRaw) ? 'longitudinal' : /stand|station/.test(kindRaw) ? 'standing' : 'transverse'
+  const unit = spec.unit ? String(spec.unit) : ''
+  const hasA = spec.amplitude !== undefined && spec.amplitude !== null && spec.amplitude !== '' && Number.isFinite(Number(spec.amplitude))
+  const hasL = spec.wavelength !== undefined && spec.wavelength !== null && spec.wavelength !== '' && Number.isFinite(Number(spec.wavelength))
+  const aTxt = hasA ? `Amplitude (A = ${fmt(Number(spec.amplitude))}${unit ? ' ' + unit : ''})` : 'Amplitude (A)'
+  const lTxt = hasL ? `Wavelength (\u03BB = ${fmt(Number(spec.wavelength))}${unit ? ' ' + unit : ''})` : 'Wavelength (\u03BB)'
+  const show = Array.isArray(spec.show) ? spec.show.map((s) => String(s).toLowerCase()) : null
+  const want = (name) => !show || show.some((s) => s.includes(name))
+  const W = 380
+  const left = 52
+  const L = 300 // length of the wave in drawing units
+  const title = spec.title ? String(spec.title) : ''
+  const titleH = title ? 24 : 0
+  let body = ''
+  if (title) body += T(W / 2, 18, title, { size: 14, weight: 700, fill: p.text })
+
+  if (kind === 'transverse') {
+    const cycles = clamp(Math.round(num(spec.cycles, 2)), 2, 4)
+    const A = 56
+    const lam = L / cycles
+    const y0 = titleH + 76 + A
+    const H = y0 + A + 64
+    // equilibrium (rest) line
+    if (want('equilibrium') || want('rest')) {
+      body += line(left - 6, y0, left + L + 10, y0, p.sub, 1.3, '6 4')
+      body += T(left + 2, y0 + 15, 'Equilibrium', { size: 11, fill: p.sub, anchor: 'start', halo: p.bg })
+    }
+    // the curve: y = A sin(2 pi x / lambda), computed every pixel
+    let d = ''
+    for (let i = 0; i <= L; i++) {
+      const x = left + i
+      const y = y0 - A * Math.sin((2 * Math.PI * i) / lam)
+      d += `${i ? 'L' : 'M'}${r1(x)} ${r1(y)}`
+    }
+    body += `<path d="${d}" fill="none" stroke="${p.accent}" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>`
+    const crest1 = left + lam / 4
+    const crest2 = left + (5 * lam) / 4
+    const trough1 = left + (3 * lam) / 4
+    // crest and trough
+    if (want('crest')) {
+      body += `<circle cx="${r1(crest1)}" cy="${r1(y0 - A)}" r="4.2" fill="${p.accent}" stroke="${p.bg}" stroke-width="1.5"/>`
+      body += T(crest1, y0 - A - 9, 'Crest', { size: 12.5, weight: 700, fill: p.text })
+    }
+    if (want('trough')) {
+      body += `<circle cx="${r1(trough1)}" cy="${r1(y0 + A)}" r="4.2" fill="${p.accent}" stroke="${p.bg}" stroke-width="1.5"/>`
+      body += T(trough1, y0 + A + 19, 'Trough', { size: 12.5, weight: 700, fill: p.text })
+    }
+    // amplitude: from the rest line to the crest level, at the left edge
+    if (want('amplitude')) {
+      const ax = left - 16
+      body += line(ax, y0 - A, crest1 - 5, y0 - A, p.sub, 1, '3 3')
+      body += arrow(ax, y0 - A / 2 + 0.01, ax, y0 - A, p.text, 1.6, 7)
+      body += arrow(ax, y0 - A / 2 - 0.01, ax, y0, p.text, 1.6, 7)
+      body += `<g transform="rotate(-90 ${ax - 9} ${r1(y0 - A / 2)})">${T(ax - 9, y0 - A / 2 + 4, aTxt, { size: 11.5, weight: 600, fill: p.text })}</g>`
+    }
+    // wavelength: crest to the next crest
+    if (want('wavelength') && crest2 <= left + L + 1) {
+      const wy = y0 - A - 34
+      body += line(crest1, y0 - A - 16, crest1, wy - 5, p.sub, 1, '3 3')
+      body += line(crest2, y0 - A - 4, crest2, wy - 5, p.sub, 1, '3 3')
+      body += arrow(crest1 + (crest2 - crest1) / 2 + 0.01, wy, crest2, wy, p.text, 1.6, 7)
+      body += arrow(crest1 + (crest2 - crest1) / 2 - 0.01, wy, crest1, wy, p.text, 1.6, 7)
+      body += T((crest1 + crest2) / 2, wy - 7, lTxt, { size: 12, weight: 600, fill: p.text })
+    }
+    // direction of travel
+    if (want('direction')) {
+      const dy = H - 18
+      body += arrow(left + L / 2 - 50, dy, left + L / 2 + 50, dy, p.sub, 2, 9)
+      body += T(left + L / 2, dy - 7, 'Direction of wave travel', { size: 11, fill: p.sub })
+    }
+    return wrap(W, H, body)
+  }
+
+  if (kind === 'longitudinal') {
+    const cycles = clamp(Math.round(num(spec.cycles, 3)), 2, 4)
+    const lam = L / cycles
+    const y0 = titleH + 90
+    const half = 26
+    const H = y0 + half + 78
+    const a = lam * 0.12 // displacement amplitude of the particles (0.12 of a wavelength keeps the lines apart)
+    const N = 70
+    // particles: u is the rest position, the real position is u + a sin(2 pi u / lambda)
+    for (let i = 0; i <= N; i++) {
+      const u = (i / N) * L
+      const x = left + u + a * Math.sin((2 * Math.PI * u) / lam)
+      body += line(x, y0 - half, x, y0 + half, p.accent, 1.6)
+    }
+    // dense places (compressions) are at u = lambda/2, 3 lambda/2 ...; thin places (rarefactions) at u = lambda, 2 lambda ...
+    const comp = []
+    const rare = []
+    for (let k = 0; k < cycles; k++) comp.push(left + (k + 0.5) * lam)
+    for (let k = 1; k <= cycles; k++) if (k * lam < L - 6) rare.push(left + k * lam)
+    if (want('compression')) comp.forEach((cx, i) => { if (i < 2 || comp.length <= 3) body += T(cx, y0 - half - 8, 'Compression', { size: 11.5, weight: 700, fill: p.text }) })
+    if (want('rarefaction')) rare.forEach((rx, i) => { if (i < 2) body += T(rx, y0 + half + 17, 'Rarefaction', { size: 11.5, weight: 700, fill: p.text }) })
+    if (want('wavelength') && comp.length >= 2) {
+      const wy = y0 - half - 30
+      const c1 = comp[0]
+      const c2 = comp[1]
+      body += line(c1, y0 - half - 20, c1, wy - 4, p.sub, 1, '3 3')
+      body += line(c2, y0 - half - 20, c2, wy - 4, p.sub, 1, '3 3')
+      body += arrow((c1 + c2) / 2 + 0.01, wy, c2, wy, p.text, 1.6, 7)
+      body += arrow((c1 + c2) / 2 - 0.01, wy, c1, wy, p.text, 1.6, 7)
+      body += T((c1 + c2) / 2, wy - 7, lTxt, { size: 12, weight: 600, fill: p.text })
+    }
+    if (want('direction')) {
+      const dy = H - 34
+      body += arrow(left + L / 2 - 50, dy, left + L / 2 + 50, dy, p.sub, 2, 9)
+      body += T(left + L / 2, dy - 7, 'Direction of wave travel', { size: 11, fill: p.sub })
+      body += T(left + L / 2, dy + 17, 'Particles vibrate back and forth, parallel to this', { size: 11, fill: p.sub })
+    }
+    return wrap(W, H, body)
+  }
+
+  // standing wave: nodes (no movement) and antinodes (largest movement)
+  const loops = clamp(Math.round(num(spec.loops, num(spec.cycles, 3))), 2, 6)
+  const A = 52
+  const y0 = titleH + 74 + A
+  const H = y0 + A + 62
+  const lenLoop = L / loops
+  let dUp = ''
+  let dDown = ''
+  for (let i = 0; i <= L; i++) {
+    const s = Math.sin((Math.PI * loops * i) / L)
+    dUp += `${i ? 'L' : 'M'}${r1(left + i)} ${r1(y0 - A * s)}`
+    dDown += `${i ? 'L' : 'M'}${r1(left + i)} ${r1(y0 + A * s)}`
+  }
+  body += line(left - 6, y0, left + L + 6, y0, p.sub, 1.2, '6 4')
+  body += `<path d="${dUp}" fill="none" stroke="${p.accent}" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>`
+  body += `<path d="${dDown}" fill="none" stroke="${p.accent}" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round" stroke-linecap="round" opacity="0.75"/>`
+  for (let k = 0; k <= loops; k++) {
+    const nx = left + k * lenLoop
+    body += `<circle cx="${r1(nx)}" cy="${r1(y0)}" r="3.8" fill="${p.bg}" stroke="${p.text}" stroke-width="1.8"/>`
+  }
+  if (want('node')) body += T(left - 9, y0 + 4, 'Node', { size: 12, weight: 700, fill: p.text, anchor: 'end', halo: p.bg })
+  const antiX = left + 0.5 * lenLoop
+  if (want('antinode')) {
+    body += `<circle cx="${r1(antiX)}" cy="${r1(y0 - A)}" r="4.2" fill="${p.accent}" stroke="${p.bg}" stroke-width="1.5"/>`
+    body += T(antiX, y0 - A - 9, 'Antinode', { size: 12, weight: 700, fill: p.text })
+  }
+  if (want('wavelength') && loops >= 2) {
+    const wy = y0 - A - 34
+    const x1 = left
+    const x2 = left + 2 * lenLoop
+    body += line(x1, y0 - 6, x1, wy - 5, p.sub, 1, '3 3')
+    body += line(x2, y0 - 6, x2, wy - 5, p.sub, 1, '3 3')
+    body += arrow((x1 + x2) / 2 + 0.01, wy, x2, wy, p.text, 1.6, 7)
+    body += arrow((x1 + x2) / 2 - 0.01, wy, x1, wy, p.text, 1.6, 7)
+    body += T((x1 + x2) / 2, wy - 7, hasL ? lTxt : 'Wavelength (\u03BB = 2 loops)', { size: 12, weight: 600, fill: p.text })
+  }
+  body += T(left + L / 2, H - 14, 'Solid and dashed curves: the two extreme positions of the string', { size: 11, fill: p.sub })
+  return wrap(W, H, body)
+}
+
+// ---------------------------------------------------------------------------
+// 7. Projectile motion: exact path, maximum height, range and time of flight
+// ---------------------------------------------------------------------------
+function projectile(spec, p) {
+  const v0 = num(spec.v0, 0)
+  const ang = clamp(num(spec.angle, 45), -80, 89)
+  const g = num(spec.g, 9.8) || 9.8
+  const h0 = Math.max(0, num(spec.h0, 0))
+  const unit = spec.unit ? String(spec.unit) : 'm'
+  if (!(v0 > 0)) throw new Error('A projectile diagram needs a launch speed v0 greater than 0.')
+  const th = (ang * Math.PI) / 180
+  const vx = v0 * Math.cos(th)
+  const vy = v0 * Math.sin(th)
+  const disc = vy * vy + 2 * g * h0
+  if (disc < 0) throw new Error('This projectile never reaches the ground.')
+  const Tf = (vy + Math.sqrt(disc)) / g
+  if (!(Tf > 0)) throw new Error('This projectile never leaves the ground.')
+  const R = vx * Tf
+  const tp = vy > 0 ? vy / g : 0
+  const Hm = h0 + (vy > 0 ? (vy * vy) / (2 * g) : 0)
+  const W = 380
+  const left = 44
+  const pw = 296
+  const titleH = spec.title ? 24 : 0
+  const s = Math.min(pw / R, 140 / Math.max(Hm, 1e-9))
+  const top = titleH + 50
+  const groundY = top + Hm * s + 8
+  const H = Math.round(groundY + 82)
+  let body = ''
+  if (spec.title) body += T(W / 2, 18, String(spec.title), { size: 14, weight: 700, fill: p.text })
+  body += line(left - 14, groundY, left + R * s + 18, groundY, p.sub, 1.6)
+  const ly = groundY - h0 * s
+  if (h0 > 0) {
+    body += line(left, ly, left, groundY, p.sub, 1.2, '4 3')
+    body += T(left + 12, (ly + groundY) / 2 + 4, `h_0 = ${fmt(h0)} ${unit}`, { size: 11, fill: p.sub, anchor: 'start', halo: p.bg })
+  }
+  let d = ''
+  const N = 180
+  for (let i = 0; i <= N; i++) {
+    const t = (Tf * i) / N
+    const x = left + vx * t * s
+    const y = groundY - (h0 + vy * t - 0.5 * g * t * t) * s
+    d += `${i ? 'L' : 'M'}${r1(x)} ${r1(y)}`
+  }
+  body += `<path d="${d}" fill="none" stroke="${p.accent}" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>`
+  // launch velocity and angle
+  const vl = 48
+  const tx = left + vl * Math.cos(th)
+  const ty = ly - vl * Math.sin(th)
+  body += arrow(left, ly, tx, ty, p.text, 2.2, 9)
+  body += T(left + 8, ly + (th > 0 ? 32 : -22), `v_0 = ${fmt(v0)} ${unit}/s`, { size: 12, weight: 600, fill: p.text, anchor: 'start', halo: p.bg })
+  if (Math.abs(ang) > 0.5) {
+    let a = ''
+    for (let i = 0; i <= 30; i++) {
+      const aa = (th * i) / 30
+      a += `${i ? 'L' : 'M'}${r1(left + 28 * Math.cos(aa))} ${r1(ly - 28 * Math.sin(aa))}`
+    }
+    body += `<path d="${a}" fill="none" stroke="${p.sub}" stroke-width="1.4"/>`
+    body += T(left + 40, ly + (th > 0 ? 13 : -4), `\u03B8 = ${fmt(ang)}\u00B0`, { size: 11.5, fill: p.sub, anchor: 'start', halo: p.bg })
+  }
+  // maximum height
+  if (vy > 0) {
+    const mxp = left + vx * tp * s
+    const myp = groundY - Hm * s
+    body += line(mxp, myp, mxp, groundY, p.sub, 1.2, '4 3')
+    body += `<circle cx="${r1(mxp)}" cy="${r1(myp)}" r="4" fill="${p.accent}" stroke="${p.bg}" stroke-width="1.5"/>`
+    body += T(mxp, myp - 11, `H = ${fmt(Hm)} ${unit}`, { size: 12, weight: 700, fill: p.text, halo: p.bg })
+  }
+  // landing point and range
+  const lx = left + R * s
+  body += `<circle cx="${r1(lx)}" cy="${r1(groundY)}" r="4" fill="${p.accent}" stroke="${p.bg}" stroke-width="1.5"/>`
+  const ry = groundY + 22
+  body += line(left, groundY + 4, left, ry + 5, p.sub, 1, '3 3')
+  body += line(lx, groundY + 4, lx, ry + 5, p.sub, 1, '3 3')
+  body += arrow((left + lx) / 2 + 0.01, ry, lx, ry, p.text, 1.6, 7)
+  body += arrow((left + lx) / 2 - 0.01, ry, left, ry, p.text, 1.6, 7)
+  body += T((left + lx) / 2, ry + 16, `Range R = ${fmt(R)} ${unit}`, { size: 12, weight: 600, fill: p.text })
+  body += T(W / 2, H - 10, `Time of flight T = ${fmt(Tf)} s   (g = ${fmt(g)} ${unit}/s^2)`, { size: 12, fill: p.sub })
+  return wrap(W, H, body)
+}
+
+// ---------------------------------------------------------------------------
+// 8. Spherical mirror ray diagram (concave f > 0, convex f < 0)
+// ---------------------------------------------------------------------------
+function mirror(spec, p) {
+  let f = num(spec.f, 0)
+  const u = num(spec.u, 0)
+  const h = num(spec.h, 3)
+  const hGiven = spec.h !== undefined && spec.h !== null && spec.h !== ''
+  if (/convex|diverg/.test(String(spec.kind || spec.mirror || spec.type || '')) && f > 0) f = -f
+  if (!f || !(u > 0)) throw new Error('A mirror diagram needs a focal length f and an object distance u greater than 0.')
+  const unit = spec.unit ? String(spec.unit) : 'cm'
+  const W = 380
+  const H = 330
+  const mx = 250
+  const ay = 150
+  const atFocus = Math.abs(1 / f - 1 / u) < 1e-9
+  const v = atFocus ? Infinity : 1 / (1 / f - 1 / u) // distance in front of the mirror (negative = behind it)
+  const hi = atFocus ? 0 : (-h * v) / u
+  const front = Math.max(u, !atFocus && v > 0 ? Math.min(v, 5 * Math.abs(f) + u) : 0, 2 * Math.abs(f)) * 1.1
+  const behind = !atFocus && v < 0 ? Math.min(-v, 4 * Math.abs(f)) * 1.05 : f < 0 ? Math.abs(f) * 2.2 : 0
+  const sx = Math.min(215 / front, behind > 0 ? 100 / behind : Infinity)
+  const hmax = Math.max(Math.abs(h), atFocus ? 0 : Math.min(Math.abs(hi), 3 * Math.abs(h)))
+  const sy = 62 / (hmax || 1)
+  const X = (dd) => mx - dd * sx
+  const Y = (yy) => ay - yy * sy
+  const yLim = 122 / sy
+  const real = !atFocus && v > 0
+  const bulgePx = f > 0 ? 15 : -15
+  // x on the page where a ray at height py meets the curved mirror
+  const hitX = (py) => mx + bulgePx * Math.max(0, 1 - ((py - ay) / 82) * ((py - ay) / 82))
+  const XD = (dd, py) => (dd === 0 ? hitX(py) : X(dd))
+  let body = ''
+  body += line(X(front), ay, mx + Math.max(behind, 40) * sx > 366 ? 366 : mx + Math.max(behind, 40) * sx, ay, p.sub, 1.2)
+  // the mirror: a smooth curve with hatching behind it
+  const bulge = f > 0 ? 15 : -15
+  let md = `M${mx} ${ay - 82} Q${mx + 2 * bulge} ${ay} ${mx} ${ay + 82}`
+  body += `<path d="${md}" fill="none" stroke="${p.text}" stroke-width="3" stroke-linecap="round"/>`
+  for (let i = -7; i <= 7; i++) {
+    const tt = (i / 7.5 + 1) / 2
+    const bx = (1 - tt) * (1 - tt) * mx + 2 * (1 - tt) * tt * (mx + 2 * bulge) + tt * tt * mx
+    const by = (1 - tt) * (1 - tt) * (ay - 82) + 2 * (1 - tt) * tt * ay + tt * tt * (ay + 82)
+    body += line(bx, by, bx + 9, by + 7, p.sub, 1)
+  }
+  // focal point and centre of curvature
+  ;[[f, 'F'], [2 * f, 'C']].forEach(([dd, nm]) => {
+    const px = X(dd)
+    if (px < 14 || px > 366) return
+    body += `<circle cx="${r1(px)}" cy="${ay}" r="3" fill="${p.sub}"/>`
+    body += T(px, ay + 17, nm, { size: 12, weight: 600, fill: p.sub, halo: p.bg })
+  })
+  // object
+  body += arrow(X(u), ay, X(u), Y(h), p.text, 2.6, 9)
+  body += T(X(u), ay + 32, 'Object', { size: 11.5, fill: p.text })
+  // rays: a straight line y = y0 + m d, drawn only where it stays on the page
+  const clip = (y0, m, a, b) => {
+    let lo = Math.min(a, b)
+    let hi2 = Math.max(a, b)
+    if (Math.abs(m) < 1e-12) return Math.abs(y0) <= yLim ? [lo, hi2] : null
+    const d1 = (-yLim - y0) / m
+    const d2 = (yLim - y0) / m
+    lo = Math.max(lo, Math.min(d1, d2))
+    hi2 = Math.min(hi2, Math.max(d1, d2))
+    return lo < hi2 ? [lo, hi2] : null
+  }
+  const draw = (y0, m, a, b, color, dash) => {
+    const c = clip(y0, m, a, b)
+    if (!c) return ''
+    return line(XD(c[0], Y(y0 + m * c[0])), Y(y0 + m * c[0]), XD(c[1], Y(y0 + m * c[1])), Y(y0 + m * c[1]), color, 1.8, dash)
+  }
+  const reach = front * 0.98
+  const back = !atFocus && v < 0 ? v : f < 0 ? f : 0
+  const rays = []
+  rays.push({ inc: [[u, h], [0, h]], y0: h, m: -h / f }) // parallel ray, reflected through F
+  if (!atFocus) rays.push({ inc: [[u, h], [0, (h * -f) / (u - f)]], y0: (h * -f) / (u - f), m: 0 }) // ray through F, reflected parallel
+  rays.push({ inc: [[u, h], [0, 0]], y0: 0, m: -h / u }) // ray to the pole
+  rays.forEach((r) => {
+    body += line(X(r.inc[0][0]), Y(r.inc[0][1]), hitX(Y(r.inc[1][1])), Y(r.inc[1][1]), p.text, 1.8)
+    body += draw(r.y0, r.m, 0, reach, p.accent)
+    if (back < 0) body += draw(r.y0, r.m, back, 0, p.accent, '5 4')
+  })
+  // image
+  if (!atFocus && Math.abs(hi) > 1e-9 && Math.abs(v) < 1e5) {
+    const ix = X(v)
+    if (ix > 8 && ix < 372) {
+      if (real) body += arrow(ix, ay, ix, Y(hi), p.accent, 2.6, 9)
+      else {
+        body += line(ix, ay, ix, Y(hi) + (hi > 0 ? 7 : -7), p.accent, 2.6, '5 3')
+        body += arrow(ix, Y(hi) + (hi > 0 ? 8 : -8), ix, Y(hi), p.accent, 2.6, 9)
+      }
+      body += T(Math.min(ix, 346), hi > 0 ? Y(hi) - 8 : Y(hi) + 16, 'Image', { size: 11.5, weight: 600, fill: p.accent, halo: p.bg })
+    }
+  } else if (atFocus) body += T(150, 40, 'Object at F: reflected rays are parallel, image at infinity', { size: 12, fill: p.accent })
+  body += T(190, 262, `f = ${fmt(f)} ${unit} (${f > 0 ? 'concave' : 'convex'})   u = ${fmt(u)} ${unit}`, { size: 13, weight: 600, fill: p.text })
+  if (!atFocus) {
+    const m = -v / u
+    body += T(190, 282, `v = ${fmt(v)} ${unit}   m = ${fmt(m)}${hGiven ? `   h\u2032 = ${fmt(hi)} ${unit}` : ''}`, { size: 13, weight: 600, fill: p.accent })
+    body += T(190, 302, `${real ? 'Real' : 'Virtual'}, ${hi < 0 ? 'inverted' : 'upright'}, ${Math.abs(m) > 1.0001 ? 'magnified' : Math.abs(m) < 0.9999 ? 'diminished' : 'same size'}`, { size: 12, fill: p.sub })
+  }
+  return wrap(W, H, body)
+}
+
+// ---------------------------------------------------------------------------
+// 9. Sketch: a general drawing from simple parts (smooth curves, arrows, arcs,
+//    shapes, dimension lines, labels). Works for any subject. Every curve is
+//    smoothed in code, so a curved line is always a clean, continuous curve.
+// ---------------------------------------------------------------------------
+function smoothPath(pts, closed) {
+  const n = pts.length
+  if (n < 2) return ''
+  if (n === 2) return `M${r1(pts[0][0])} ${r1(pts[0][1])}L${r1(pts[1][0])} ${r1(pts[1][1])}`
+  const at = (i) => (closed ? pts[((i % n) + n) % n] : pts[clamp(i, 0, n - 1)])
+  let d = `M${r1(pts[0][0])} ${r1(pts[0][1])}`
+  const segs = closed ? n : n - 1
+  for (let i = 0; i < segs; i++) {
+    const p0 = at(i - 1)
+    const p1 = at(i)
+    const p2 = at(i + 1)
+    const p3 = at(i + 2)
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6]
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6]
+    d += `C${r1(c1[0])} ${r1(c1[1])} ${r1(c2[0])} ${r1(c2[1])} ${r1(p2[0])} ${r1(p2[1])}`
+  }
+  return d + (closed ? 'Z' : '')
+}
+
+function sketch(spec, p) {
+  const W = 380
+  const H = clamp(Math.round(num(spec.height, 300)), 120, 460)
+  const items = Array.isArray(spec.items) ? spec.items.slice(0, 160) : []
+  const col = (c, dflt) => {
+    const k = String(c || dflt || 'text').toLowerCase()
+    return k === 'accent' ? p.accent : k === 'muted' || k === 'sub' || k === 'grey' || k === 'gray' ? p.sub : k === 'none' ? 'none' : p.text
+  }
+  const pt = (a) => (Array.isArray(a) && a.length >= 2 && Number.isFinite(Number(a[0])) && Number.isFinite(Number(a[1])) ? [clamp(Number(a[0]), -30, W + 30), clamp(Number(a[1]), -30, H + 30)] : null)
+  const pts = (a) => (Array.isArray(a) ? a.map(pt).filter(Boolean).slice(0, 80) : [])
+  const wd = (it, d) => clamp(num(it.w, d), 0.5, 6)
+  const dash = (it) => (it.dashed ? ' stroke-dasharray="6 4"' : '')
+  let body = ''
+  let drawn = 0
+  if (spec.title) body += T(W / 2, 18, String(spec.title), { size: 14, weight: 700, fill: p.text })
+  items.forEach((it) => {
+    if (!it || typeof it !== 'object') return
+    const k = String(it.k || it.kind || it.type || '').toLowerCase()
+    const c = col(it.color, 'text')
+    const fill = col(it.fill, 'none')
+    const fo = it.fill && it.fill !== 'none' && it.opacity === undefined ? ' fill-opacity="0.22"' : it.opacity !== undefined ? ` fill-opacity="${clamp(num(it.opacity, 1), 0, 1)}"` : ''
+    if (k === 'curve' || k === 'spline') {
+      const a = pts(it.pts || it.points)
+      if (a.length < 2) return
+      const closed = !!it.closed
+      body += `<path d="${smoothPath(a, closed)}" fill="${closed ? fill : 'none'}"${closed ? fo : ''} stroke="${c}" stroke-width="${wd(it, 2.4)}" stroke-linejoin="round" stroke-linecap="round"${dash(it)}/>`
+      const ar = String(it.arrow || '')
+      if (!closed && (ar === 'end' || ar === 'both')) {
+        const e = a[a.length - 1]
+        const b = a[a.length - 2]
+        const L = Math.hypot(e[0] - b[0], e[1] - b[1]) || 1
+        body += arrow(e[0] - ((e[0] - b[0]) / L) * 3, e[1] - ((e[1] - b[1]) / L) * 3, e[0], e[1], c, wd(it, 2.4), 9)
+      }
+      if (!closed && (ar === 'start' || ar === 'both')) {
+        const e = a[0]
+        const b = a[1]
+        const L = Math.hypot(e[0] - b[0], e[1] - b[1]) || 1
+        body += arrow(e[0] - ((e[0] - b[0]) / L) * 3, e[1] - ((e[1] - b[1]) / L) * 3, e[0], e[1], c, wd(it, 2.4), 9)
+      }
+    } else if (k === 'line' || k === 'arrow') {
+      const a = pt(it.from)
+      const b = pt(it.to)
+      if (!a || !b) return
+      const ar = String(it.arrow || (k === 'arrow' ? 'end' : ''))
+      if (ar === 'end' || ar === 'both') body += arrow(a[0], a[1], b[0], b[1], c, wd(it, 2.2), 9)
+      else body += line(a[0], a[1], b[0], b[1], c, wd(it, 2), it.dashed ? '6 4' : undefined)
+      if (ar === 'start' || ar === 'both') body += arrow(b[0], b[1], a[0], a[1], c, wd(it, 2.2), 9)
+    } else if (k === 'poly' || k === 'polygon' || k === 'polyline') {
+      const a = pts(it.pts || it.points)
+      if (a.length < 2) return
+      const closed = it.closed !== false && k !== 'polyline'
+      body += `<path d="M${a.map((q) => `${r1(q[0])} ${r1(q[1])}`).join('L')}${closed ? 'Z' : ''}" fill="${closed ? fill : 'none'}"${closed ? fo : ''} stroke="${c}" stroke-width="${wd(it, 2)}" stroke-linejoin="round"${dash(it)}/>`
+    } else if (k === 'circle') {
+      const a = pt(it.c || it.at)
+      const r = clamp(num(it.r, 20), 1, 300)
+      if (!a) return
+      body += `<circle cx="${r1(a[0])}" cy="${r1(a[1])}" r="${r1(r)}" fill="${fill}"${fo} stroke="${c}" stroke-width="${wd(it, 2)}"${dash(it)}/>`
+    } else if (k === 'ellipse') {
+      const a = pt(it.c || it.at)
+      if (!a) return
+      const rot = num(it.rot, 0)
+      body += `<ellipse cx="${r1(a[0])}" cy="${r1(a[1])}" rx="${r1(clamp(num(it.rx, 30), 1, 300))}" ry="${r1(clamp(num(it.ry, 18), 1, 300))}"${rot ? ` transform="rotate(${r1(rot)} ${r1(a[0])} ${r1(a[1])})"` : ''} fill="${fill}"${fo} stroke="${c}" stroke-width="${wd(it, 2)}"${dash(it)}/>`
+    } else if (k === 'rect') {
+      const x = clamp(num(it.x, 0), -30, W + 30)
+      const y = clamp(num(it.y, 0), -30, H + 30)
+      body += `<rect x="${r1(x)}" y="${r1(y)}" width="${r1(clamp(num(it.w, 40), 1, W + 60))}" height="${r1(clamp(num(it.h, 30), 1, H + 60))}" rx="${r1(clamp(num(it.r, 0), 0, 60))}" fill="${fill}"${fo} stroke="${c}" stroke-width="${wd(it, 2)}"${dash(it)}/>`
+    } else if (k === 'arc') {
+      const a = pt(it.c || it.at)
+      if (!a) return
+      const r = clamp(num(it.r, 24), 2, 300)
+      const a0 = num(it.from, 0)
+      const a1 = num(it.to, 90)
+      let d = ''
+      const steps = 60
+      for (let i = 0; i <= steps; i++) {
+        const aa = ((a0 + ((a1 - a0) * i) / steps) * Math.PI) / 180
+        d += `${i ? 'L' : 'M'}${r1(a[0] + r * Math.cos(aa))} ${r1(a[1] - r * Math.sin(aa))}`
+      }
+      body += `<path d="${d}" fill="none" stroke="${c}" stroke-width="${wd(it, 1.8)}" stroke-linecap="round"${dash(it)}/>`
+      if (it.arrow) {
+        const aa = (a1 * Math.PI) / 180
+        const dir = a1 >= a0 ? 1 : -1
+        const ex = a[0] + r * Math.cos(aa)
+        const ey = a[1] - r * Math.sin(aa)
+        body += arrow(ex + dir * Math.sin(aa) * 4, ey + dir * Math.cos(aa) * 4, ex, ey, c, wd(it, 1.8), 8)
+      }
+    } else if (k === 'dim' || k === 'dimension') {
+      const a = pt(it.from)
+      const b = pt(it.to)
+      if (!a || !b) return
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+      const off = clamp(num(it.offset, 0), -80, 80)
+      const nx = (-(b[1] - a[1]) / L) * off
+      const ny = ((b[0] - a[0]) / L) * off
+      const a2 = [a[0] + nx, a[1] + ny]
+      const b2 = [b[0] + nx, b[1] + ny]
+      if (off) {
+        body += line(a[0], a[1], a2[0], a2[1], p.sub, 1, '3 3')
+        body += line(b[0], b[1], b2[0], b2[1], p.sub, 1, '3 3')
+      }
+      const mid = [(a2[0] + b2[0]) / 2, (a2[1] + b2[1]) / 2]
+      body += arrow(mid[0] + 0.01 * (b2[0] - a2[0]) / L, mid[1] + 0.01 * (b2[1] - a2[1]) / L, b2[0], b2[1], c, 1.6, 7)
+      body += arrow(mid[0] - 0.01 * (b2[0] - a2[0]) / L, mid[1] - 0.01 * (b2[1] - a2[1]) / L, a2[0], a2[1], c, 1.6, 7)
+      if (it.label) body += T(mid[0], mid[1] - 6, String(it.label), { size: num(it.size, 12), weight: 600, fill: c, halo: p.bg })
+    } else if (k === 'text' || k === 'label') {
+      const a = pt(it.at || it.pos)
+      if (!a || it.text === undefined) return
+      const anchor = ['start', 'middle', 'end'].includes(String(it.anchor)) ? String(it.anchor) : 'middle'
+      const t = T(a[0], a[1], String(it.text).slice(0, 80), { size: clamp(num(it.size, 12), 9, 24), anchor, weight: it.bold ? 700 : 400, fill: col(it.color, 'text'), italic: !!it.italic, halo: p.bg })
+      const rot = num(it.rot, 0)
+      body += rot ? `<g transform="rotate(${r1(-rot)} ${r1(a[0])} ${r1(a[1])})">${t}</g>` : t
+    } else return
+    drawn++
+  })
+  if (!drawn) throw new Error('The sketch has nothing to draw. Give it items such as curves, lines, circles and text.')
+  return wrap(W, H, body)
+}
+
+// ---------------------------------------------------------------------------
+// 10. Flowchart: boxes are placed top to bottom, arrows and loops are routed here
+// ---------------------------------------------------------------------------
+function wrapWords(text, max) {
+  const words = String(text ?? '').trim().split(/\s+/).filter(Boolean)
+  const lines = []
+  let cur = ''
+  words.forEach((w) => {
+    if (cur && (cur + ' ' + w).length > max) { lines.push(cur); cur = w } else cur = cur ? cur + ' ' + w : w
+  })
+  if (cur) lines.push(cur)
+  return lines.slice(0, 4)
+}
+
+function flow(spec, p) {
+  const raw = Array.isArray(spec.nodes) ? spec.nodes.slice(0, 16) : []
+  if (raw.length < 2) throw new Error('A flowchart needs at least 2 steps in "nodes".')
+  const W = 380
+  const cx = 150
+  const titleH = spec.title ? 26 : 0
+  const nodes = raw.map((n, i) => {
+    const o = typeof n === 'string' ? { text: n } : n || {}
+    let kind = String(o.kind || o.shape || '').toLowerCase()
+    if (!['start', 'end', 'process', 'decision', 'io'].includes(kind)) kind = i === 0 ? 'start' : i === raw.length - 1 ? 'end' : /\?\s*$/.test(String(o.text || '')) ? 'decision' : 'process'
+    const lines = wrapWords(o.text ?? o.label ?? '', kind === 'decision' ? 15 : 22)
+    const hgt = kind === 'decision' ? Math.max(64, 40 + lines.length * 15) : Math.max(38, 18 + lines.length * 15)
+    const wid = kind === 'decision' ? 176 : kind === 'io' ? 170 : kind === 'process' ? 156 : 130
+    return { id: o.id !== undefined ? String(o.id) : String(i + 1), kind, lines, h: hgt, w: wid }
+  })
+  const idx = (ref) => {
+    const byId = nodes.findIndex((n) => n.id === String(ref))
+    if (byId >= 0) return byId
+    const k = Number(ref)
+    return Number.isInteger(k) && k >= 1 && k <= nodes.length ? k - 1 : -1
+  }
+  let edges = []
+  if (Array.isArray(spec.edges) && spec.edges.length) {
+    spec.edges.slice(0, 30).forEach((e) => {
+      const a = idx(e && e.from)
+      const b = idx(e && e.to)
+      if (a >= 0 && b >= 0 && a !== b) edges.push({ a, b, label: e.label ? String(e.label).slice(0, 12) : '' })
+    })
+  }
+  if (!edges.length) for (let i = 0; i < nodes.length - 1; i++) edges.push({ a: i, b: i + 1, label: nodes[i].kind === 'decision' ? 'Yes' : '' })
+  let y = titleH + 14
+  nodes.forEach((n) => { n.y = y + n.h / 2; y += n.h + 34 })
+  const H = y - 34 + 24
+  let body = ''
+  if (spec.title) body += T(W / 2, 18, String(spec.title), { size: 14, weight: 700, fill: p.text })
+  nodes.forEach((n) => {
+    const x = cx - n.w / 2
+    const yy = n.y - n.h / 2
+    const common = `fill="${p.bg}" stroke="${n.kind === 'decision' ? p.accent : p.text}" stroke-width="2"`
+    if (n.kind === 'decision') body += `<polygon points="${cx},${r1(yy)} ${r1(cx + n.w / 2)},${r1(n.y)} ${cx},${r1(yy + n.h)} ${r1(cx - n.w / 2)},${r1(n.y)}" ${common} stroke-linejoin="round"/>`
+    else if (n.kind === 'io') body += `<polygon points="${r1(x + 14)},${r1(yy)} ${r1(x + n.w)},${r1(yy)} ${r1(x + n.w - 14)},${r1(yy + n.h)} ${r1(x)},${r1(yy + n.h)}" ${common} stroke-linejoin="round"/>`
+    else body += `<rect x="${r1(x)}" y="${r1(yy)}" width="${n.w}" height="${n.h}" rx="${n.kind === 'process' ? 5 : n.h / 2}" ${common}/>`
+    n.lines.forEach((ln, i) => { body += T(cx, n.y - ((n.lines.length - 1) * 15) / 2 + i * 15 + 4.5, ln, { size: 12.5, weight: n.kind === 'start' || n.kind === 'end' ? 700 : 500, fill: p.text }) })
+  })
+  const maxHalf = Math.max(...nodes.map((n) => n.w / 2))
+  let lane = 0
+  edges.forEach((e) => {
+    const A = nodes[e.a]
+    const B = nodes[e.b]
+    if (e.b === e.a + 1) {
+      body += arrow(cx, A.y + A.h / 2, cx, B.y - B.h / 2, p.text, 1.8, 8)
+      if (e.label) body += T(cx + 8, (A.y + A.h / 2 + B.y - B.h / 2) / 2 + 4, e.label, { size: 11.5, weight: 700, fill: p.accent, anchor: 'start', halo: p.bg })
+    } else {
+      const lx = cx + maxHalf + 18 + lane * 16
+      lane++
+      const sx0 = cx + A.w / 2
+      const ex = cx + B.w / 2
+      body += `<path d="M${r1(sx0)} ${r1(A.y)} H${r1(lx)} V${r1(B.y)} H${r1(ex + 8)}" fill="none" stroke="${p.text}" stroke-width="1.8" stroke-linejoin="round"/>`
+      body += arrow(ex + 12, B.y, ex, B.y, p.text, 1.8, 8)
+      if (e.label) body += T(sx0 + 6, A.y - 6, e.label, { size: 11.5, weight: 700, fill: p.accent, anchor: 'start', halo: p.bg })
+    }
+  })
+  return wrap(W, H, body)
+}
+
+// ---------------------------------------------------------------------------
 // Entry points
 // ---------------------------------------------------------------------------
 // The AI sometimes leaves out "type". Work it out from the other keys.
@@ -625,6 +1189,10 @@ export function inferType(o) {
   if (o.supports || o.loads) return 'beam'
   if (Array.isArray(o.forces)) return 'fbd'
   if ('f' in o && 'u' in o) return 'lens'
+  if ('v0' in o && 'angle' in o) return 'projectile'
+  if (Array.isArray(o.nodes)) return 'flow'
+  if (Array.isArray(o.items)) return 'sketch'
+  if ('wavelength' in o || 'amplitude' in o || 'loops' in o || (o.cycles !== undefined && o.kind !== undefined)) return 'wave'
   if ('h' in o && 'k' in o && 'l' in o) return 'miller_plane'
   return ''
 }
@@ -644,6 +1212,17 @@ export function renderDiagram(spec, p) {
       return circuit(spec, p)
     case 'lens':
       return lens(spec, p)
+    case 'wave':
+    case 'waves':
+      return wave(spec, p)
+    case 'projectile':
+      return projectile(spec, p)
+    case 'mirror':
+      return mirror(spec, p)
+    case 'sketch':
+      return sketch(spec, p)
+    case 'flow':
+      return flow(spec, p)
     default:
       throw new Error(`Unknown diagram type "${spec.type}".`)
   }

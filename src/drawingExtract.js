@@ -66,6 +66,16 @@ export function normalizeSpec(spec) {
     else if (/^(beam|beam_diagram|loaded_beam|simply_supported_beam|cantilever|cantilever_beam)$/.test(t)) t = 'beam'
     else if (/^(circuit|circuit_diagram|electric_circuit)$/.test(t)) t = 'circuit'
     else if (/^(lens|lens_diagram|ray_diagram|thin_lens|convex_lens|concave_lens)$/.test(t)) t = 'lens'
+    else if (/^(wave|waves|wave_diagram|transverse_wave|longitudinal_wave|standing_wave|sine_wave|parts_of_a_wave|wave_parts)$/.test(t)) {
+      if (/longitudinal/.test(t) && !o.kind) o.kind = 'longitudinal'
+      if (/standing/.test(t) && !o.kind) o.kind = 'standing'
+      t = 'wave'
+    } else if (/^(projectile|projectile_motion|trajectory|projectile_path)$/.test(t)) t = 'projectile'
+    else if (/^(mirror|concave_mirror|convex_mirror|spherical_mirror|mirror_diagram|mirror_ray_diagram)$/.test(t)) {
+      if (/convex/.test(t) && !o.kind) o.kind = 'convex'
+      t = 'mirror'
+    } else if (/^(sketch|drawing|illustration|scene|figure|free_drawing)$/.test(t)) t = 'sketch'
+    else if (/^(flow|flowchart|flow_chart|process_flow|algorithm|flow_diagram)$/.test(t)) t = 'flow'
     else if (/^(graph|plot|chart|function|function_plot|line_graph)$/.test(t)) t = 'graph'
     o.type = t
   }

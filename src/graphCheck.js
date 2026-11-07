@@ -42,7 +42,7 @@ export function checkGraph(spec, { question = '' } = {}) {
   // Axes start at zero when the question says so and no data is negative.
   if (ZERO_RULE.test(question)) {
     const xs = R.series.flatMap((s) => s.points.map((q) => q[0]))
-    const ys = R.series.flatMap((s) => s.points.map((q) => q[1]))
+    const ys = R.series.filter((s) => !s.right).flatMap((s) => s.points.map((q) => q[1]))
     if (xs.length && Math.min(...xs) >= 0 && Number.isFinite(Number(fixed.xmin)) && Number(fixed.xmin) !== 0) { fixed.xmin = 0; fixes.push('Started the x-axis at zero.') }
     if (ys.length && Math.min(...ys) >= 0 && Number.isFinite(Number(fixed.ymin)) && Number(fixed.ymin) !== 0) { fixed.ymin = 0; fixes.push('Started the y-axis at zero.') }
   }
@@ -63,14 +63,19 @@ export function checkGraph(spec, { question = '' } = {}) {
 
   // Safe fixes: labelled points sit exactly on the data, series keep only what is inside the axes.
   if (R.pointSpecs.length) {
-    fixed.points = R.points.map((q) => ({ x: Number(q.x.toPrecision(10)), y: Number(q.y.toPrecision(10)), label: q.rawLabel ?? q.label }))
+    fixed.points = R.points.map((q) => (q.right
+      ? { series: q.seriesName, at: 'x', x: Number(q.x.toPrecision(10)), label: q.rawLabel ?? q.label }
+      : { x: Number(q.x.toPrecision(10)), y: Number(q.y.toPrecision(10)), label: q.rawLabel ?? q.label }))
   }
   const eps = 0.02
   const rx = view.xmax - view.xmin
   const ry = view.ymax - view.ymin
   if (Array.isArray(fixed.series) && R.series.length === fixed.series.length) {
     fixed.series.forEach((s, i) => {
-      const keep = R.series[i].points.filter((q) => q[0] >= view.xmin - rx * eps && q[0] <= view.xmax + rx * eps && q[1] >= view.ymin - ry * eps && q[1] <= view.ymax + ry * eps)
+      // A right-axis series is checked against its own scale, not the left one.
+      const [vlo, vhi] = R.series[i].right && R.y2 ? [R.y2.min, R.y2.max] : [view.ymin, view.ymax]
+      const ryS = vhi - vlo
+      const keep = R.series[i].points.filter((q) => q[0] >= view.xmin - rx * eps && q[0] <= view.xmax + rx * eps && q[1] >= vlo - ryS * eps && q[1] <= vhi + ryS * eps)
       if (keep.length !== R.series[i].points.length && keep.length >= 2) {
         fixes.push(`Left ${R.series[i].points.length - keep.length} point(s) of "${R.series[i].name || 'series ' + (i + 1)}" out, because they are outside the axes.`)
         s.points = keep
@@ -95,6 +100,8 @@ const NEAR_MAX = 0.10
 const STATES_MAX = 0.5
 const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const decimals = (t) => (String(t).split('.')[1] || '').length
+// Not after "true": "true stress at UTS" is a different quantity.
+const UTS_NAME = '(?<!true\\s+(?:stress\\s+)?(?:at\\s+)?)(?:ultimate\\s+tensile\\s+(?:strength|stress)|tensile\\s+strength|UTS)'
 const E_NAME = "(?:Young['\\u2019]?s\\s+modulus|elastic\\s+modulus|modulus\\s+of\\s+elasticity)"
 
 function readingsFromGraph(spec) {
@@ -117,6 +124,21 @@ function readingsFromGraph(spec) {
     // "Young's modulus ... 198.8 GPa" in the text is the same quantity as "E = ..." on the graph
     if (m[1] === 'E') out.push({ name: "Young's modulus", pattern: E_NAME, unit: m[3] || '', value })
   })
+  // Recipe: a stress-strain graph. The ultimate tensile strength is the highest stress on the
+  // engineering curve, so it is read from the data even if the model did not label that point.
+  // Only used when no labelled UTS exists, and "true stress at UTS" lines are never touched.
+  try {
+    const xl = String(spec.xlabel || '')
+    const yl = String(spec.ylabel || '')
+    const unit = ((yl.match(/\(([^)]*)\)/) || [])[1] || '').trim()
+    if (/strain/i.test(xl) && /stress/i.test(yl) && /^(MPa|GPa|kPa)$/i.test(unit) && !out.some((r) => /UTS|ultimate/i.test(r.name || ''))) {
+      const eng = ctx.R.series.find((q) => !q.right && !/true/i.test(q.name || ''))
+      if (eng && eng.points.length >= 3) {
+        const value = Math.max(...eng.points.map((q) => q[1]))
+        if (Number.isFinite(value) && value > 0) out.push({ name: 'UTS', pattern: UTS_NAME, unit, value })
+      }
+    }
+  } catch (e) { /* no recipe, no change */ }
   return out
 }
 
