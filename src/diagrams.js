@@ -645,7 +645,7 @@ function wave(spec, p) {
     // equilibrium (rest) line
     if (want('equilibrium') || want('rest')) {
       body += line(left - 6, y0, left + L + 10, y0, p.sub, 1.3, '6 4')
-      body += T(left + 2, y0 + 15, 'Equilibrium', { size: 11, fill: p.sub, anchor: 'start', halo: p.bg })
+      body += T(left + 2, y0 + 15, 'Equilibrium', { size: 12, fill: p.sub, anchor: 'start', halo: p.bg })
     }
     // the curve: y = A sin(2 pi x / lambda), computed every pixel
     let d = ''
@@ -678,7 +678,7 @@ function wave(spec, p) {
     // wavelength: crest to the next crest
     if (want('wavelength') && crest2 <= left + L + 1) {
       const wy = y0 - A - 34
-      body += line(crest1, y0 - A - 16, crest1, wy - 5, p.sub, 1, '3 3')
+      body += line(crest1, y0 - A - 27, crest1, wy - 5, p.sub, 1, '3 3')
       body += line(crest2, y0 - A - 4, crest2, wy - 5, p.sub, 1, '3 3')
       body += arrow(crest1 + (crest2 - crest1) / 2 + 0.01, wy, crest2, wy, p.text, 1.6, 7)
       body += arrow(crest1 + (crest2 - crest1) / 2 - 0.01, wy, crest1, wy, p.text, 1.6, 7)
@@ -688,7 +688,7 @@ function wave(spec, p) {
     if (want('direction')) {
       const dy = H - 18
       body += arrow(left + L / 2 - 50, dy, left + L / 2 + 50, dy, p.sub, 2, 9)
-      body += T(left + L / 2, dy - 7, 'Direction of wave travel', { size: 11, fill: p.sub })
+      body += T(left + L / 2, dy - 7, 'Direction of wave travel', { size: 12, fill: p.sub })
     }
     return wrap(W, H, body)
   }
@@ -727,8 +727,8 @@ function wave(spec, p) {
     if (want('direction')) {
       const dy = H - 34
       body += arrow(left + L / 2 - 50, dy, left + L / 2 + 50, dy, p.sub, 2, 9)
-      body += T(left + L / 2, dy - 7, 'Direction of wave travel', { size: 11, fill: p.sub })
-      body += T(left + L / 2, dy + 17, 'Particles vibrate back and forth, parallel to this', { size: 11, fill: p.sub })
+      body += T(left + L / 2, dy - 7, 'Direction of wave travel', { size: 12, fill: p.sub })
+      body += T(left + L / 2, dy + 17, 'Particles vibrate back and forth, parallel to this', { size: 12, fill: p.sub })
     }
     return wrap(W, H, body)
   }
@@ -769,7 +769,7 @@ function wave(spec, p) {
     body += arrow((x1 + x2) / 2 - 0.01, wy, x1, wy, p.text, 1.6, 7)
     body += T((x1 + x2) / 2, wy - 7, hasL ? lTxt : 'Wavelength (\u03BB = 2 loops)', { size: 12, weight: 600, fill: p.text })
   }
-  body += T(left + L / 2, H - 14, 'Solid and dashed curves: the two extreme positions of the string', { size: 11, fill: p.sub })
+  body += T(left + L / 2, H - 14, 'Solid and dashed: the two extreme positions', { size: 12, fill: p.sub })
   return wrap(W, H, body)
 }
 
@@ -794,8 +794,8 @@ function projectile(spec, p) {
   const tp = vy > 0 ? vy / g : 0
   const Hm = h0 + (vy > 0 ? (vy * vy) / (2 * g) : 0)
   const W = 380
-  const left = 44
-  const pw = 296
+  const left = 60
+  const pw = 280
   const titleH = spec.title ? 24 : 0
   const s = Math.min(pw / R, 140 / Math.max(Hm, 1e-9))
   const top = titleH + 50
@@ -823,7 +823,8 @@ function projectile(spec, p) {
   const tx = left + vl * Math.cos(th)
   const ty = ly - vl * Math.sin(th)
   body += arrow(left, ly, tx, ty, p.text, 2.2, 9)
-  body += T(left + 8, ly + (th > 0 ? 32 : -22), `v_0 = ${fmt(v0)} ${unit}/s`, { size: 12, weight: 600, fill: p.text, anchor: 'start', halo: p.bg })
+  if (h0 > 0) body += T(left + 8, ly + (th > 0 ? 32 : -22), `v_0 = ${fmt(v0)} ${unit}/s`, { size: 12, weight: 600, fill: p.text, anchor: 'start', halo: p.bg })
+  else body += T(tx - 4, ty - 8, `v_0 = ${fmt(v0)} ${unit}/s`, { size: 12, weight: 600, fill: p.text, anchor: 'end', halo: p.bg })
   if (Math.abs(ang) > 0.5) {
     let a = ''
     for (let i = 0; i <= 30; i++) {
@@ -831,7 +832,7 @@ function projectile(spec, p) {
       a += `${i ? 'L' : 'M'}${r1(left + 28 * Math.cos(aa))} ${r1(ly - 28 * Math.sin(aa))}`
     }
     body += `<path d="${a}" fill="none" stroke="${p.sub}" stroke-width="1.4"/>`
-    body += T(left + 40, ly + (th > 0 ? 13 : -4), `\u03B8 = ${fmt(ang)}\u00B0`, { size: 11.5, fill: p.sub, anchor: 'start', halo: p.bg })
+    body += T(left + 36, h0 > 0 ? ly + (th > 0 ? 13 : -4) : ly - (th > 0 ? 6 : -14), `\u03B8 = ${fmt(ang)}\u00B0`, { size: 11.5, fill: p.sub, anchor: 'start', halo: p.bg })
   }
   // maximum height
   if (vy > 0) {
