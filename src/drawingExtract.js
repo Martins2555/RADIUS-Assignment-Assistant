@@ -74,7 +74,8 @@ export function normalizeSpec(spec) {
     else if (/^(mirror|concave_mirror|convex_mirror|spherical_mirror|mirror_diagram|mirror_ray_diagram)$/.test(t)) {
       if (/convex/.test(t) && !o.kind) o.kind = 'convex'
       t = 'mirror'
-    } else if (/^(sketch|drawing|illustration|scene|figure|free_drawing)$/.test(t)) t = 'sketch'
+    } else if (/^(sfd|bmd|sfd_bmd|sfd_and_bmd|shear_moment|shear_and_moment|shear_force|shear_force_diagram|bending_moment|bending_moment_diagram|shear_force_and_bending_moment)$/.test(t)) t = 'sfd'
+    else if (/^(sketch|drawing|illustration|scene|figure|free_drawing)$/.test(t)) t = 'sketch'
     else if (/^(flow|flowchart|flow_chart|process_flow|algorithm|flow_diagram)$/.test(t)) t = 'flow'
     else if (/^(graph|plot|chart|function|function_plot|line_graph)$/.test(t)) t = 'graph'
     o.type = t

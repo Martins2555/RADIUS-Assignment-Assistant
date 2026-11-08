@@ -6,7 +6,7 @@
 
 const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
 
-export const DIAGRAM_TYPES = ['miller_plane', 'fbd', 'beam', 'circuit', 'lens', 'wave', 'projectile', 'mirror', 'sketch', 'flow']
+export const DIAGRAM_TYPES = ['miller_plane', 'fbd', 'beam', 'circuit', 'lens', 'wave', 'projectile', 'mirror', 'sketch', 'flow', 'sfd']
 
 const num = (v, d = 0) => {
   const n = Number(v)
@@ -794,8 +794,8 @@ function projectile(spec, p) {
   const tp = vy > 0 ? vy / g : 0
   const Hm = h0 + (vy > 0 ? (vy * vy) / (2 * g) : 0)
   const W = 380
-  const left = 60
-  const pw = 280
+  const left = 66
+  const pw = 274
   const titleH = spec.title ? 24 : 0
   const s = Math.min(pw / R, 140 / Math.max(Hm, 1e-9))
   const top = titleH + 50
@@ -807,7 +807,7 @@ function projectile(spec, p) {
   const ly = groundY - h0 * s
   if (h0 > 0) {
     body += line(left, ly, left, groundY, p.sub, 1.2, '4 3')
-    body += T(left + 12, (ly + groundY) / 2 + 4, `h_0 = ${fmt(h0)} ${unit}`, { size: 11, fill: p.sub, anchor: 'start', halo: p.bg })
+    body += T(left - 6, groundY - ly < 26 ? groundY + 17 : (ly + groundY) / 2 + 4, `h_0 = ${fmt(h0)} ${unit}`, { size: 11.5, fill: p.sub, anchor: 'end', halo: p.bg })
   }
   let d = ''
   const N = 180
@@ -823,8 +823,7 @@ function projectile(spec, p) {
   const tx = left + vl * Math.cos(th)
   const ty = ly - vl * Math.sin(th)
   body += arrow(left, ly, tx, ty, p.text, 2.2, 9)
-  if (h0 > 0) body += T(left + 8, ly + (th > 0 ? 32 : -22), `v_0 = ${fmt(v0)} ${unit}/s`, { size: 12, weight: 600, fill: p.text, anchor: 'start', halo: p.bg })
-  else body += T(tx - 4, ty - 8, `v_0 = ${fmt(v0)} ${unit}/s`, { size: 12, weight: 600, fill: p.text, anchor: 'end', halo: p.bg })
+  body += T(tx - 4, ty - 8, `v_0 = ${fmt(v0)} ${unit}/s`, { size: 12, weight: 600, fill: p.text, anchor: 'end', halo: p.bg })
   if (Math.abs(ang) > 0.5) {
     let a = ''
     for (let i = 0; i <= 30; i++) {
@@ -832,7 +831,7 @@ function projectile(spec, p) {
       a += `${i ? 'L' : 'M'}${r1(left + 28 * Math.cos(aa))} ${r1(ly - 28 * Math.sin(aa))}`
     }
     body += `<path d="${a}" fill="none" stroke="${p.sub}" stroke-width="1.4"/>`
-    body += T(left + 36, h0 > 0 ? ly + (th > 0 ? 13 : -4) : ly - (th > 0 ? 6 : -14), `\u03B8 = ${fmt(ang)}\u00B0`, { size: 11.5, fill: p.sub, anchor: 'start', halo: p.bg })
+    body += T(left + 36, ly - (th > 0 ? 6 : -14), `\u03B8 = ${fmt(ang)}\u00B0`, { size: 11.5, fill: p.sub, anchor: 'start', halo: p.bg })
   }
   // maximum height
   if (vy > 0) {
@@ -1178,6 +1177,279 @@ function flow(spec, p) {
 }
 
 // ---------------------------------------------------------------------------
+// 11. Shear force and bending moment diagrams. The reactions, the shear force,
+//     the bending moment and the maximum moment are all calculated exactly here,
+//     so the drawing is always right. Sagging bending moment is drawn upward.
+// ---------------------------------------------------------------------------
+function sfd(spec, p) {
+  const L = num(spec.length, 0)
+  if (!(L > 0)) throw new Error('The beam needs a positive length.')
+  const unit = spec.unit ? String(spec.unit) : 'm'
+  const fu = spec.forceUnit ? String(spec.forceUnit) : 'kN'
+  const mu = `${fu}${unit}`
+  const EPS = 1e-9
+  // loads: P positive = downward, w positive = downward, m positive = clockwise
+  const loads = []
+  ;(Array.isArray(spec.loads) ? spec.loads : []).slice(0, 10).forEach((ld) => {
+    if (!ld || typeof ld !== 'object') return
+    const kind = String(ld.kind || ld.type || 'point').toLowerCase()
+    const val = num(ld.value ?? ld.magnitude ?? ld.w ?? ld.P ?? ld.load, NaN)
+    if (!Number.isFinite(val)) return
+    if (kind === 'moment') loads.push({ k: 'm', x: clamp(num(ld.at, 0), 0, L), m: val * (String(ld.dir || 'cw').toLowerCase() === 'ccw' ? -1 : 1) })
+    else {
+      const sg = String(ld.dir || 'down').toLowerCase() === 'up' ? -1 : 1
+      if (kind === 'udl' || kind === 'distributed') {
+        const a = clamp(num(ld.from, 0), 0, L)
+        const b = clamp(num(ld.to, L), 0, L)
+        if (b > a) loads.push({ k: 'u', a, b, w: val * sg })
+      } else loads.push({ k: 'p', x: clamp(num(ld.at, 0), 0, L), P: val * sg })
+    }
+  })
+  if (!loads.length) throw new Error('The diagram needs loads with numbers, for example {"kind":"point","at":2,"value":20}.')
+  // supports
+  const sup = (Array.isArray(spec.supports) ? spec.supports : []).slice(0, 3).filter((s) => s && typeof s === 'object')
+  const typeWord = String(spec.beamType || spec.support || '').toLowerCase()
+  let a = 0
+  let b = L
+  let fixed = null
+  if (sup.length >= 2) {
+    const xs = sup.map((s) => clamp(num(s.at, 0), 0, L)).sort((m, n) => m - n)
+    a = xs[0]
+    b = xs[xs.length - 1]
+    if (b - a < EPS) { a = 0; b = L }
+  } else if (sup.length === 1 && /fixed|built|cantilever/.test(String(sup[0].kind || sup[0].type || 'fixed').toLowerCase())) fixed = num(sup[0].at, 0) > L / 2 ? 'right' : 'left'
+  else if (/cantilever|fixed/.test(typeWord)) fixed = /right/.test(typeWord) ? 'right' : 'left'
+
+  const lt = (pos, x, side) => pos < x - EPS || (Math.abs(pos - x) <= EPS && side === 'R')
+  // model for a beam whose loads are given from the left (fixed end, if any, at x = 0)
+  const model = (ls, isFixed) => {
+    const totalLoad = ls.reduce((s, q) => s + (q.k === 'p' ? q.P : q.k === 'u' ? q.w * (q.b - q.a) : 0), 0)
+    const udlPart = (q, x) => (x > q.a ? Math.min(x, q.b) - q.a : 0)
+    const rest = (x, side, Ra, Rb, M0) => {
+      // shear and moment at x from everything to the left, with the given reactions
+      let V = 0
+      let M = M0
+      if (lt(isFixed ? 0 : a, x, side)) V += Ra
+      if (!isFixed && lt(b, x, side)) V += Rb
+      if (x > (isFixed ? 0 : a) - EPS) M += Ra * (x - (isFixed ? 0 : a))
+      if (!isFixed && x >= b) M += Rb * (x - b)
+      ls.forEach((q) => {
+        if (q.k === 'p') {
+          if (lt(q.x, x, side)) V -= q.P
+          if (x > q.x) M -= q.P * (x - q.x)
+        } else if (q.k === 'u') {
+          const len = udlPart(q, x)
+          V -= q.w * len
+          if (len > 0) M -= q.w * len * (x - (q.a + len / 2))
+        } else if (lt(q.x, x, side)) M += q.m
+      })
+      return { V, M }
+    }
+    if (isFixed) {
+      const Ra = totalLoad
+      const M0 = -rest(L, 'R', Ra, 0, 0).M
+      return { Ra, Rb: 0, M0, f: (x, side) => rest(x, side, Ra, 0, M0) }
+    }
+    const sumM = ls.reduce((s, q) => s + (q.k === 'p' ? q.P * (q.x - a) : q.k === 'u' ? q.w * (q.b - q.a) * ((q.a + q.b) / 2 - a) : q.m), 0)
+    const Rb = sumM / (b - a)
+    const Ra = totalLoad - Rb
+    return { Ra, Rb, M0: 0, f: (x, side) => rest(x, side, Ra, Rb, 0) }
+  }
+  let mdl
+  let VM
+  if (fixed === 'right') {
+    const mir = loads.map((q) => (q.k === 'p' ? { ...q, x: L - q.x } : q.k === 'u' ? { ...q, a: L - q.b, b: L - q.a } : { ...q, x: L - q.x, m: -q.m }))
+    mdl = model(mir, true)
+    VM = (x, side) => {
+      const r = mdl.f(L - x, side === 'R' ? 'L' : 'R')
+      return { V: -r.V, M: r.M }
+    }
+  } else {
+    mdl = model(loads, fixed === 'left')
+    VM = mdl.f
+  }
+  // breakpoints and sample points
+  const bpSet = new Set([0, L])
+  if (!fixed) { bpSet.add(a); bpSet.add(b) }
+  loads.forEach((q) => { if (q.k === 'u') { bpSet.add(q.a); bpSet.add(q.b) } else bpSet.add(q.x) })
+  const bps = [...bpSet].map((v) => Math.round(v * 1e9) / 1e9).sort((m, n) => m - n).filter((v, i, arr) => i === 0 || v - arr[i - 1] > 1e-9)
+  const samples = []
+  const NS = 180
+  for (let i = 0; i < bps.length; i++) {
+    if (i > 0) {
+      const x0 = bps[i - 1]
+      const x1 = bps[i]
+      const n = Math.max(1, Math.round(NS * ((x1 - x0) / L)))
+      for (let k = 1; k < n; k++) {
+        const x = x0 + ((x1 - x0) * k) / n
+        samples.push({ x, ...VM(x, 'R') })
+      }
+    }
+    const xl = VM(bps[i], 'L')
+    const xr = VM(bps[i], 'R')
+    if (i > 0) samples.push({ x: bps[i], ...xl })
+    samples.push({ x: bps[i], ...xr })
+  }
+  samples.sort((m, n) => m.x - n.x || 0)
+  // extremes of the bending moment: ends of each piece and the points where the shear is zero
+  const cands = []
+  bps.forEach((x) => { cands.push({ x, M: VM(x, 'L').M }); cands.push({ x, M: VM(x, 'R').M }) })
+  const zeros = []
+  for (let i = 1; i < bps.length; i++) {
+    const V1 = VM(bps[i - 1], 'R').V
+    const V2 = VM(bps[i], 'L').V
+    if (V1 * V2 < 0) {
+      const xz = bps[i - 1] + ((bps[i] - bps[i - 1]) * V1) / (V1 - V2)
+      zeros.push(xz)
+      cands.push({ x: xz, M: VM(xz, 'R').M })
+    }
+  }
+  const mMax = cands.reduce((s, c) => (c.M > s.M ? c : s), { M: -Infinity, x: 0 })
+  const mMin = cands.reduce((s, c) => (c.M < s.M ? c : s), { M: Infinity, x: 0 })
+  const maxV = Math.max(...samples.map((s) => Math.abs(s.V)), 1e-9)
+  const posV = Math.max(0, ...samples.map((s) => s.V))
+  const negV = Math.max(0, ...samples.map((s) => -s.V))
+  const posM = Math.max(0, ...samples.map((s) => s.M))
+  const negM = Math.max(0, ...samples.map((s) => -s.M))
+  if (maxV < 1e-9 && posM < 1e-9 && negM < 1e-9) throw new Error('These loads give no shear force or bending moment.')
+
+  // ---- drawing ----
+  const W = 380
+  const x0 = 56
+  const x1 = 326
+  const X = (x) => x0 + (x / L) * (x1 - x0)
+  const titleH = spec.title ? 24 : 0
+  const yBeam = titleH + 76
+  const sTop = yBeam + 76
+  const sH = 128
+  const bTop = sTop + sH + 12
+  const bH = 140
+  const H = Math.round(bTop + bH + 40)
+  let body = ''
+  if (spec.title) body += T(W / 2, 18, String(spec.title), { size: 14, weight: 700, fill: p.text })
+  // guides down through both plots
+  bps.forEach((x) => { body += line(X(x), yBeam + 6, X(x), bTop + bH + 4, p.sub, 0.8, '2 4') })
+  // the beam
+  body += `<rect x="${x0}" y="${yBeam - 3}" width="${x1 - x0}" height="6" rx="1.5" fill="${p.text}"/>`
+  const sups = fixed ? [{ kind: 'fixed', x: fixed === 'right' ? L : 0 }] : [{ kind: String((sup[0] && (sup[0].kind || sup[0].type)) || 'pin').toLowerCase(), x: a, label: sup[0] && sup[0].label }, { kind: String((sup[sup.length - 1] && sup.length > 1 && (sup[sup.length - 1].kind || sup[sup.length - 1].type)) || 'roller').toLowerCase(), x: b, label: sup.length > 1 ? sup[sup.length - 1].label : undefined }]
+  sups.forEach((s, i) => {
+    const px = X(s.x)
+    if (s.kind === 'fixed') {
+      const right = s.x > L / 2
+      const wx = right ? px : px - 10
+      body += `<rect x="${r1(wx)}" y="${yBeam - 26}" width="10" height="56" fill="${p.sub}" fill-opacity="0.16" stroke="${p.text}" stroke-width="1.5"/>`
+      for (let yy = yBeam - 22; yy < yBeam + 26; yy += 9) body += line(right ? wx + 10 : wx, yy, right ? wx + 18 : wx - 8, yy + 8, p.sub, 1)
+    } else if (s.kind === 'roller' || (i === 1 && s.kind !== 'pin')) {
+      body += `<polygon points="${r1(px)},${yBeam + 3} ${r1(px - 11)},${yBeam + 21} ${r1(px + 11)},${yBeam + 21}" fill="none" stroke="${p.text}" stroke-width="1.5" stroke-linejoin="round"/>`
+      body += `<circle cx="${r1(px - 5)}" cy="${yBeam + 25}" r="3.6" fill="none" stroke="${p.text}" stroke-width="1.3"/><circle cx="${r1(px + 5)}" cy="${yBeam + 25}" r="3.6" fill="none" stroke="${p.text}" stroke-width="1.3"/>`
+      body += line(px - 16, yBeam + 29, px + 16, yBeam + 29, p.text, 1.5)
+    } else {
+      body += `<polygon points="${r1(px)},${yBeam + 3} ${r1(px - 11)},${yBeam + 22} ${r1(px + 11)},${yBeam + 22}" fill="none" stroke="${p.text}" stroke-width="1.5" stroke-linejoin="round"/>`
+      body += line(px - 17, yBeam + 22, px + 17, yBeam + 22, p.text, 1.5)
+    }
+    if (s.label) body += T(px, yBeam + 46, String(s.label), { size: 13, weight: 700, fill: p.accent })
+  })
+  // reactions
+  const rName = (i) => (sups[i] && sups[i].label ? `R_${sups[i].label}` : i === 0 ? 'R_1' : 'R_2')
+  if (fixed) body += T(X(fixed === 'right' ? L : 0) + (fixed === 'right' ? -4 : 4), yBeam + 50, `R = ${fmt(Math.abs(mdl.Ra), 4)} ${fu}, M = ${fmt(Math.abs(mdl.M0), 4)} ${mu}`, { size: 11.5, weight: 600, fill: p.accent, anchor: fixed === 'right' ? 'end' : 'start' })
+  else {
+    body += T(X(a), yBeam + 62, `${rName(0)} = ${fmt(mdl.Ra, 4)} ${fu}`, { size: 11.5, weight: 600, fill: p.accent, anchor: a < L / 2 ? 'start' : 'end' })
+    body += T(X(b), yBeam + 62, `${rName(1)} = ${fmt(mdl.Rb, 4)} ${fu}`, { size: 11.5, weight: 600, fill: p.accent, anchor: b > L / 2 ? 'end' : 'start' })
+  }
+  // loads
+  loads.forEach((q) => {
+    if (q.k === 'p') {
+      const down = q.P >= 0
+      const px = X(q.x)
+      if (down) body += arrow(px, yBeam - 46, px, yBeam - 4, p.accent, 2, 8)
+      else body += arrow(px, yBeam + 46, px, yBeam + 4, p.accent, 2, 8)
+      body += T(px, down ? yBeam - 52 : yBeam + 58, `${fmt(Math.abs(q.P), 4)} ${fu}`, { size: 11.5, weight: 700, fill: p.accent, halo: p.bg })
+    } else if (q.k === 'u') {
+      const xa = X(q.a)
+      const xb = X(q.b)
+      const top = yBeam - 30
+      body += line(xa, top, xb, top, p.accent, 1.6)
+      const n = Math.max(2, Math.round((xb - xa) / 17))
+      for (let i = 0; i <= n; i++) {
+        const xx = xa + ((xb - xa) * i) / n
+        body += q.w >= 0 ? arrow(xx, top, xx, yBeam - 4, p.accent, 1.4, 6) : arrow(xx, yBeam + 30, xx, yBeam + 4, p.accent, 1.4, 6)
+      }
+      body += T((xa + xb) / 2, top - 8, `${fmt(Math.abs(q.w), 4)} ${fu}/${unit}`, { size: 11.5, weight: 700, fill: p.accent, halo: p.bg })
+    } else {
+      const px = X(q.x)
+      body += T(px, yBeam - 30, `${q.m >= 0 ? '\u21BB' : '\u21BA'} ${fmt(Math.abs(q.m), 4)} ${mu}`, { size: 12, weight: 700, fill: p.accent, halo: p.bg })
+    }
+  })
+  // a plot panel: the zero line is placed so the positive and negative parts both fit
+  const panel = (title, top, h, pos, neg, vals) => {
+    const y0p = top + 34
+    const y1p = top + h - (neg > 1e-9 ? 22 : 8)
+    const ih = y1p - y0p
+    const total = Math.max(pos + neg, 1e-9)
+    const zero = neg < 1e-9 ? y1p : pos < 1e-9 ? y0p : y0p + (ih * pos) / total
+    const sc = ih / (neg < 1e-9 ? Math.max(pos, 1e-9) : pos < 1e-9 ? Math.max(neg, 1e-9) : total)
+    const Y = (v) => zero - v * sc
+    body += T(x0 - 2, top + 12, title, { size: 12.5, weight: 700, fill: p.text, anchor: 'start' })
+    let d = `M${r1(X(vals[0].x))} ${r1(zero)}`
+    vals.forEach((q) => { d += `L${r1(X(q.x))} ${r1(Y(q.y))}` })
+    d += `L${r1(X(vals[vals.length - 1].x))} ${r1(zero)}Z`
+    body += `<path d="${d}" fill="${p.accent}" fill-opacity="0.16" stroke="none"/>`
+    body += line(x0 - 8, zero, x1 + 8, zero, p.sub, 1.3)
+    let dl = ''
+    vals.forEach((q, k) => { dl += `${k ? 'L' : 'M'}${r1(X(q.x))} ${r1(Y(q.y))}` })
+    body += `<path d="${dl}" fill="none" stroke="${p.accent}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>`
+    return { zero, Y }
+  }
+  const lab = (x, y, v, anchor, dy, bold) => T(x, y + dy, `${v > 0 ? '+' : v < 0 ? '\u2212' : ''}${fmt(Math.abs(v), 4)}`, { size: 11, weight: bold ? 700 : 600, fill: p.text, anchor, halo: p.bg })
+  // shear force diagram
+  const S = panel(`Shear force diagram (${fu})`, sTop, sH, posV, negV, samples.map((s) => ({ x: s.x, y: s.V })))
+  const shown = new Set()
+  bps.forEach((x, i) => {
+    const vl = VM(x, 'L').V
+    const vr = VM(x, 'R').V
+    const jump = Math.abs(vl - vr) > 1e-9
+    const put = (v, anchor, which) => {
+      const key = `${r1(X(x))}|${fmt(v, 4)}|${which}`
+      if (shown.has(key)) return
+      shown.add(key)
+      if (Math.abs(v) < 1e-9) return
+      body += lab(X(x) + (anchor === 'start' ? 3 : anchor === 'end' ? -3 : 0), S.Y(v), v, anchor, v > 0 ? -5 : 13)
+    }
+    if (i === 0) put(vr, 'start', 'r')
+    else if (i === bps.length - 1) put(vl, 'end', 'l')
+    else if (jump) { put(vl, 'end', 'l'); put(vr, 'start', 'r') }
+  })
+  zeros.forEach((xz) => {
+    body += `<circle cx="${r1(X(xz))}" cy="${r1(S.zero)}" r="3.3" fill="${p.bg}" stroke="${p.text}" stroke-width="1.5"/>`
+    // put the label on the empty side of the zero line, to the left of the crossing
+    const before = VM(xz - 1e-6, 'L').V
+    body += T(X(xz) - 5, S.zero + (before > 0 ? 15 : -8), `V = 0 at x = ${fmt(xz, 4)} ${unit}`, { size: 11, weight: 700, fill: p.text, anchor: 'end', halo: p.bg })
+  })
+  // bending moment diagram
+  const B = panel(`Bending moment diagram (${mu})`, bTop, bH, posM, negM, samples.map((s) => ({ x: s.x, y: s.M })))
+  const shownM = new Set()
+  const mark = (x, m, bold) => {
+    const key = `${r1(X(x))}|${fmt(m, 4)}`
+    if (shownM.has(key) || Math.abs(m) < 1e-9) return
+    shownM.add(key)
+    body += `<circle cx="${r1(X(x))}" cy="${r1(B.Y(m))}" r="3.4" fill="${p.accent}" stroke="${p.bg}" stroke-width="1.4"/>`
+    const nearRight = X(x) > x1 - 50
+    const nearLeft = X(x) < x0 + 50
+    body += lab(X(x) + (nearRight ? -5 : nearLeft ? 5 : 0), B.Y(m), m, nearRight ? 'end' : nearLeft ? 'start' : 'middle', m > 0 ? -9 : 17, bold)
+  }
+  if (mMax.M > 1e-9) mark(mMax.x, mMax.M, true)
+  if (mMin.M < -1e-9) mark(mMin.x, mMin.M, true)
+  const nearExtreme = (x, m) => (Math.abs(m - mMax.M) <= 0.03 * Math.abs(mMax.M) && Math.abs(x - mMax.x) < 0.15 * L) || (Math.abs(m - mMin.M) <= 0.03 * Math.abs(mMin.M) && Math.abs(x - mMin.x) < 0.15 * L)
+  bps.forEach((x) => { const m = VM(x, 'R').M; if (Math.abs(m) > 1e-9 && !nearExtreme(x, m)) mark(x, m, false) })
+  // distances along the beam
+  bps.forEach((x) => { body += T(X(x), bTop + bH + 18, fmt(x, 4), { size: 10.5, fill: p.sub }) })
+  body += T(x1 + 6, bTop + bH + 18, `(${unit})`, { size: 10.5, fill: p.sub, anchor: 'start' })
+  if (mMax.M > 1e-9) body += T(W / 2, H - 6, `Maximum bending moment = ${fmt(mMax.M, 4)} ${mu} at x = ${fmt(mMax.x, 4)} ${unit}`, { size: 12, weight: 700, fill: p.accent })
+  else if (mMin.M < -1e-9) body += T(W / 2, H - 6, `Maximum bending moment = ${fmt(mMin.M, 4)} ${mu} (hogging) at x = ${fmt(mMin.x, 4)} ${unit}`, { size: 12, weight: 700, fill: p.accent })
+  return wrap(W, H, body)
+}
+
+// ---------------------------------------------------------------------------
 // Entry points
 // ---------------------------------------------------------------------------
 // The AI sometimes leaves out "type". Work it out from the other keys.
@@ -1224,6 +1496,8 @@ export function renderDiagram(spec, p) {
       return sketch(spec, p)
     case 'flow':
       return flow(spec, p)
+    case 'sfd':
+      return sfd(spec, p)
     default:
       throw new Error(`Unknown diagram type "${spec.type}".`)
   }
