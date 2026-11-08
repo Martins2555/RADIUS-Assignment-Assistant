@@ -246,7 +246,7 @@ function cleanSegment(raw) {
   try { value = evalNumeric(s) } catch (e) { return { numeric: false } }
   const plain = /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(s.replace(/\s+/g, ''))
   const dp = plain ? (s.split('.')[1] || '').replace(/\D/g, '').length : null
-  return { numeric: true, value, unit, plain, dp, text: s.replace(/\s+/g, ' ') }
+  return { numeric: true, value, unit, plain, dp, hasDec: /\d\.\d/.test(s), text: s.replace(/\s+/g, ' ') }
 }
 
 export function auditArithmetic(reply) {
@@ -264,6 +264,8 @@ export function auditArithmetic(reply) {
         const approx = segs[i].op === '~'
         let tol = Math.max(Math.abs(a.value), Math.abs(b.value)) * 1e-6 + 1e-9
         for (const s of [a, b]) if (s.plain) tol = Math.max(tol, 0.5 * 10 ** -s.dp * 1.0001)
+        // Rounded decimals in working (80.86 - 3.32 - 18.77 = 58.77, or 6.67 x 10^-4) are not mistakes: allow 0.3%.
+        if (a.hasDec || b.hasDec) tol = Math.max(tol, Math.max(Math.abs(a.value), Math.abs(b.value)) * 0.003)
         if (approx) tol = Math.max(tol, Math.max(Math.abs(a.value), Math.abs(b.value)) * 0.011)
         if (Math.abs(a.value - b.value) > tol) {
           out.push({ line: `${a.text} = ${b.text}`, stated: b.text, computed: sig(a.value, 6), statedValue: sig(b.value, 6) })
