@@ -68,7 +68,7 @@ function millerFacts(q) {
   return lines.length ? lines : null
 }
 
-function lensFacts(q) {
+function lensFacts(q, K) {
   if (!/\blens\b/i.test(q) || /\bmirror\b/i.test(q)) return null
   const f = /\bf\s*=\s*(-?\d+(?:\.\d+)?)\s*(cm|mm|m)\b|focal length[^\d-]{0,25}(-?\d+(?:\.\d+)?)\s*(cm|mm|m)\b/i.exec(q)
   const u = /\bu\s*=\s*(-?\d+(?:\.\d+)?)\s*(cm|mm|m)\b|object (?:distance|is placed|placed)[^\d-]{0,30}(-?\d+(?:\.\d+)?)\s*(cm|mm|m)\b/i.exec(q)
@@ -83,11 +83,12 @@ function lensFacts(q) {
   if (Math.abs(uv - fv) < 1e-9) return [`Object at the focal point: the image forms at infinity.`]
   const v = (fv * uv) / (uv - fv) // real-is-positive: 1/v = 1/f - 1/u
   const m = -v / uv
+  if (K) K.items.push({ label: 'image distance', value: Math.abs(v), unit })
   const nature = v > 0 ? 'real and inverted' : 'virtual and upright (same side as the object)'
   return [`Thin lens (1/f = 1/v + 1/u, real-is-positive): image distance |v| = ${sig(Math.abs(v))} ${unit}, magnification |m| = ${sig(Math.abs(m))}, image is ${nature}.`]
 }
 
-function beamFacts(q) {
+function beamFacts(q, K) {
   if (!/simply[- ]supported/i.test(q)) return null
   if (/overhang|cantilever|fixed|moment|couple|triangular|varying|uvl|inclined|hinge|continuous|three supports|\bfrom (?:support )?B\b|from the right/i.test(q)) return null
   const L = /(?:span|length|long)\D{0,12}?(\d+(?:\.\d+)?)\s*m\b|(\d+(?:\.\d+)?)\s*m\s*(?:long|span)/i.exec(q)
@@ -127,10 +128,11 @@ function beamFacts(q) {
   const total = loads.reduce((s, l) => s + l.P, 0)
   const RB = loads.reduce((s, l) => s + l.P * l.x, 0) / len
   const RA = total - RB
+  if (K) { K.items.push({ label: 'reaction R_A', value: RA, unit: 'kN' }); K.items.push({ label: 'reaction R_B', value: RB, unit: 'kN' }) }
   return [`Simply supported beam, span ${fmt(len, 3)} m, supports at both ends (A at the left end, B at the right end), loads measured from A. Total load ${fmt(total, 3)} kN. Reactions (upward): R_A = ${fmt(RA, 3)} kN and R_B = ${fmt(RB, 3)} kN. Any diagram must show these loads and supports.`]
 }
 
-function resistorFacts(q) {
+function resistorFacts(q, K) {
   const series = /\bseries\b/i.test(q)
   const parallel = /\bparallel\b/i.test(q)
   if (series === parallel) return null
@@ -138,6 +140,7 @@ function resistorFacts(q) {
   const vals = [...q.matchAll(/(\d+(?:\.\d+)?)\s*(?:\u03A9|\u2126|ohms?|\bR\b)/gi)].map((m) => num(m[1]))
   if (vals.length < 2 || vals.some((v) => !(v > 0))) return null
   const req = series ? vals.reduce((a, b) => a + b, 0) : 1 / vals.reduce((a, b) => a + 1 / b, 0)
+  if (K) K.items.push({ label: 'equivalent resistance', value: req, unit: 'ohms' })
   const lines = [`${vals.length} resistors (${vals.join(', ')} ohms) in ${series ? 'series' : 'parallel'}: equivalent resistance R_eq = ${sig(req)} ohms.`]
   const V = /(\d+(?:\.\d+)?)\s*V\b(?!\s*\/)/.exec(q)
   if (V) {
@@ -148,16 +151,154 @@ function resistorFacts(q) {
   return lines
 }
 
+
+// Open channels (trapezoidal, rectangular): optimum section or normal depth, Chezy or Manning.
+function solveDepth(Qt, fn) {
+  // fn(y) = discharge at depth y; increasing in y. Bisection, so it cannot be wrong by rounding.
+  let lo = 1e-6
+  let hi = 1
+  for (let k = 0; k < 60 && fn(hi) < Qt; k++) hi *= 2
+  if (fn(hi) < Qt) return NaN
+  for (let k = 0; k < 200; k++) {
+    const mid = (lo + hi) / 2
+    if (fn(mid) < Qt) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
+function channelOne(q, col, qno) {
+  if (!/trapezoid|rectangular (?:channel|section)|open channel/i.test(q)) return null
+  if (/compound|triangular|circular|pipe|weir|flume|hydraulic jump|specific energy|critical depth|gradually|backwater/i.test(q)) return null
+  const rect = /rectangular/i.test(q) && !/trapezoid/i.test(q)
+  let m = rect ? 0 : NaN
+  if (!rect) {
+    const hv = /(\d+(?:\.\d+)?)\s*H\s*(?::|to)\s*(\d+(?:\.\d+)?)\s*V/i.exec(q)
+    const vh = /(\d+(?:\.\d+)?)\s*V\s*(?::|to)\s*(\d+(?:\.\d+)?)\s*H/i.exec(q)
+    if (hv) m = num(hv[1]) / num(hv[2])
+    else if (vh) m = num(vh[2]) / num(vh[1])
+  }
+  if (!Number.isFinite(m) || m < 0) return null
+  const Qm = /(\d+(?:\.\d+)?)\s*m\s*(?:\^\s*3|\u00B3|3)\s*\/\s*s/i.exec(q)
+  if (!Qm) return null
+  const Q = num(Qm[1])
+  let S = NaN
+  const s1 = /\b1\s*in\s*(\d+(?:\.\d+)?)/i.exec(q)
+  const s2 = /\b1\s*(?:\/|:)\s*(\d{2,})\b/.exec(q)
+  const s3 = /(?:slope|gradient)\s*(?:of|=|is)?\s*(0?\.\d+)/i.exec(q)
+  const s4 = /\bS(?:_?0)?\s*=\s*(0?\.\d+)/.exec(q)
+  if (s1) S = 1 / num(s1[1])
+  else if (s2) S = 1 / num(s2[1])
+  else if (s3) S = num(s3[1])
+  else if (s4) S = num(s4[1])
+  if (!(S > 0) || !(Q > 0)) return null
+  const ch = /chezy[^\d]{0,40}?(\d+(?:\.\d+)?)/i.exec(q)
+  const mn = /(?:manning[^\d]{0,30}?|\bn\s*=\s*)(0?\.\d+)/i.exec(q)
+  let kind
+  let K
+  if (ch && !mn) { kind = 'chezy'; K = num(ch[1]) } else if (mn && !ch) { kind = 'manning'; K = num(mn[1]) } else return null
+  const Qof = (A, R) => (kind === 'chezy' ? A * K * Math.sqrt(R * S) : (1 / K) * A * Math.pow(R, 2 / 3) * Math.sqrt(S))
+  const optimum = /optimum|most (?:efficient|economical)|best hydraulic|economical section|most economic/i.test(q)
+  const bm = /(?:bottom|base) width(?: of| is| =)?\s*(\d+(?:\.\d+)?)\s*m\b|(\d+(?:\.\d+)?)\s*m\s*(?:wide )?bottom width|\bb\s*=\s*(\d+(?:\.\d+)?)\s*m\b/i.exec(q)
+  const out = []
+  const law = kind === 'chezy' ? `Chezy C = ${K}, Q = A C sqrt(R S)` : `Manning n = ${K}, Q = (1/n) A R^(2/3) S^(1/2)`
+  if (optimum && !bm) {
+    const r1 = Math.sqrt(1 + m * m)
+    const bRatio = 2 * (r1 - m) // b = bRatio * y
+    const aRatio = bRatio + m // A = aRatio * y^2
+    const y = solveDepth(Q, (yy) => Qof(aRatio * yy * yy, yy / 2))
+    if (!Number.isFinite(y)) return null
+    const b = bRatio * y
+    const A = aRatio * y * y
+    const T = b + 2 * m * y
+    const V = Q / A
+    const coef = kind === 'chezy' ? aRatio * K * Math.sqrt(S / 2) : (aRatio / K) * Math.pow(0.5, 2 / 3) * Math.sqrt(S)
+    const pw = kind === 'chezy' ? 2.5 : 8 / 3
+    if (col) {
+      const tag = qno ? `Q${qno} ` : ''
+      col.given.push(`${tag}optimum trapezoidal channel, side slope ${sig(m)}H:1V, S = ${sig(S)}, Q = ${Q} m3/s, ${kind === 'chezy' ? 'Chezy C' : 'Manning n'} = ${K}`)
+      col.items.push({ label: tag + 'depth y', value: y, unit: 'm' }, { label: tag + 'bottom width b', value: b, unit: 'm' }, { label: tag + 'top width T', value: T, unit: 'm' })
+    }
+    out.push(`Optimum (most efficient) trapezoidal section, side slope m = ${sig(m)} horizontal per 1 vertical, bed slope S = ${sig(S)}, Q = ${Q} m^3/s, ${law}. Conditions: R = y/2 and b = 2y(sqrt(1+m^2) - m) = ${sig(bRatio)} y. Then A = (b + m y) y = ${sig(aRatio)} y^2. The equation reduces to Q = ${sig(coef)} y^${pw}, so y^${pw} = ${sig(Q / coef)}.`)
+    out.push(`Exact answers: depth y = ${sig(y)} m, bottom width b = ${sig(b)} m, top width T = b + 2 m y = ${sig(T)} m, area A = ${sig(A)} m^2, R = ${sig(y / 2)} m, velocity V = ${sig(V)} m/s. Give y, b and T in the final answer.`)
+    return out
+  }
+  if (bm && /normal depth|depth of flow|depth of water|find the depth|determine the depth/i.test(q) && !optimum) {
+    const b = num(bm[1] || bm[2] || bm[3])
+    if (!(b > 0)) return null
+    const Af = (y) => (b + m * y) * y
+    const Pf = (y) => b + 2 * y * Math.sqrt(1 + m * m)
+    const y = solveDepth(Q, (yy) => Qof(Af(yy), Af(yy) / Pf(yy)))
+    if (!Number.isFinite(y)) return null
+    const A = Af(y)
+    const P = Pf(y)
+    const R = A / P
+    const target = kind === 'chezy' ? Q / (K * Math.sqrt(S)) : (Q * K) / Math.sqrt(S)
+    if (col) {
+      const tag = qno ? `Q${qno} ` : ''
+      col.given.push(`${tag}trapezoidal channel, b = ${b} m, side slope ${sig(m)}H:1V, S = ${sig(S)}, Q = ${Q} m3/s, ${kind === 'chezy' ? 'Chezy C' : 'Manning n'} = ${K}`)
+      col.items.push({ label: tag + 'normal depth y', value: y, unit: 'm' })
+    }
+    out.push(`Normal depth in a trapezoidal channel, b = ${b} m, side slope m = ${sig(m)}, Q = ${Q} m^3/s, S = ${sig(S)}, ${law}. The equation to solve for y is ${kind === 'chezy' ? 'A R^(1/2)' : 'A R^(2/3)'} = ${sig(target)}, with A = (b + m y) y and P = b + 2 y sqrt(1+m^2) = ${b} + ${sig(2 * Math.sqrt(1 + m * m))} y.`)
+    out.push(`Exact answer: normal depth y = ${sig(y)} m (A = ${sig(A)} m^2, P = ${sig(P)} m, R = ${sig(R)} m, V = ${sig(Q / A)} m/s). Show a trial-and-error table of at least 3 trials that brackets this value, and check Q at the end.`)
+    return out
+  }
+  return null
+}
+
+function channelFacts(q, K) {
+  // A message may hold several numbered questions: solve each one on its own.
+  const parts = q.split(/(?:^|\n)\s*(?=\d{1,2}[.)]\s)/).filter((x) => x.trim())
+  const segs = parts.length > 1 ? parts : [q]
+  const lines = []
+  segs.forEach((seg, i) => {
+    const qn = (/^\s*(\d{1,2})[.)]/.exec(seg) || [])[1]
+    const r = channelOne(seg, K, segs.length > 1 ? qn || i + 1 : '')
+    if (r) {
+      const tag = segs.length > 1 ? `(Question ${(/^\s*(\d{1,2})[.)]/.exec(seg) || [])[1] || i + 1}) ` : ''
+      lines.push(...r.map((l) => tag + l))
+    }
+  })
+  return lines.length ? lines : null
+}
+
+function runFacts(question, K) {
+  const q = String(question || '').replace(/^\[The student is replying to [\s\S]*?"\]\s*/i, '').slice(0, 4000)
+  if (!q.trim()) return []
+  const all = []
+  for (const fn of [millerFacts, lensFacts, beamFacts, resistorFacts, channelFacts]) {
+    try { const r = fn(q, K); if (r) all.push(...r) } catch (e) { /* skip this one */ }
+  }
+  return all
+}
+
 export function verifiedFacts(question) {
   try {
-    const q = String(question || '').replace(/^\[The student is replying to [\s\S]*?"\]\s*/i, '').slice(0, 4000)
-    if (!q.trim()) return ''
-    const all = []
-    for (const fn of [millerFacts, lensFacts, beamFacts, resistorFacts]) {
-      try { const r = fn(q); if (r) all.push(...r) } catch (e) { /* skip this one */ }
-    }
+    const all = runFacts(question, null)
     if (!all.length) return ''
     return `VERIFIED RESULTS (calculated exactly by RADIUS's own calculator from the numbers in the student's message). These are correct: use them exactly, and make every step, the final answer and any drawing agree with them. Show the method as normal. If the student's problem clearly differs from the assumptions stated here, ignore this block.\n${all.map((l) => '- ' + l).join('\n')}`
+  } catch (e) {
+    return ''
+  }
+}
+
+// For questions that arrive as a photo: the question text was read from the photo by a
+// small separate AI call (running at the same time as the main answer, so nothing waits).
+// Once the answer is finished, the exact results worked out from that text are compared with
+// the numbers in the answer. A short note is added only when they disagree.
+const numsIn = (t) => [...String(t || '').replace(/(\d),(\d{3})(?!\d)/g, '$1$2').matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0]))
+
+export function imageCheckNote(reply, transcript) {
+  try {
+    const K = { items: [], given: [] }
+    runFacts(transcript, K)
+    if (!K.items.length) return ''
+    const nums = numsIn(String(reply || '').replace(/```[\s\S]*?```/g, ' '))
+    const wrong = K.items.filter((it) => !nums.some((n) => Math.abs(n - it.value) <= Math.abs(it.value) * 0.01 + 1e-9))
+    if (!wrong.length) return ''
+    const list = K.items.map((it) => `${it.label} = ${sig(it.value, 4)} ${it.unit}`).join('; ')
+    const bad = wrong.map((it) => it.label).join(', ')
+    return `\n\n> **Calculator check:** I read your photo as: ${K.given.length ? K.given.join(' | ') : 'the values in the question'}. RADIUS's own calculator gets **${list}**. The working above does not match on: ${bad}. Please use the calculator values, or tap Regenerate.`
   } catch (e) {
     return ''
   }
@@ -230,7 +371,7 @@ function cleanSegment(raw) {
   const units = []
   s = s.replace(/\\(?:text|mathrm|textbf)\{([^}]*)\}(\s*\^\{?-?\d+\}?)?/g, (m, u, p) => { units.push(u + (p || '')); return ' ' })
   const unit = units.join('').replace(/\s+/g, '')
-  if (/%|\\%|\\circ|\\degree|\\infty|\\pm|\\mp|\\le|\\ge|\\neq|<|>/.test(s)) return { numeric: false }
+  if (/%|\\%|\\circ|\\degree|\\infty|\\pm|\\mp|\\le(?![a-z])|\\ge(?![a-z])|\\neq|<|>/.test(s)) return { numeric: false }
   s = s.replace(/\\(?:left|right|quad|qquad|displaystyle|boxed)|\\[,;:!]|~/g, ' ').replace(/\\boxed/g, ' ')
   for (let k = 0; k < 8 && /\\frac\{/.test(s); k++) s = s.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, '(($1)/($2))')
   s = s.replace(/\\sqrt\{([^{}]*)\}/g, 'sqrt($1)')
@@ -253,9 +394,17 @@ export function auditArithmetic(reply) {
   const out = []
   try {
     const noCode = String(reply || '').replace(/```[\s\S]*?```/g, ' ')
-    const blocks = [...noCode.matchAll(/\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]/g)].map((m) => (m[1] != null ? m[1] : m[2])).slice(0, 80)
+    const raw = [...noCode.matchAll(/\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]/g)].map((m) => (m[1] != null ? m[1] : m[2])).slice(0, 80)
+    // A line that starts with "=" continues the line before it (the step layout puts each "= ..." on its own line).
+    const blocks = []
+    for (const b of raw) {
+      const t = b.replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/gi, ' ').replace(/&/g, ' ').trim()
+      if (/^=/.test(t) && blocks.length) blocks[blocks.length - 1] += ' ' + t
+      else blocks.push(t)
+    }
     for (const block of blocks) {
-      const segs = topLevelSplit(block.replace(/\\\\/g, ' ')).map((p) => ({ ...p, c: cleanSegment(p.text) }))
+      const parts = block.replace(/\\\\/g, ' ')
+      const segs = topLevelSplit(parts).map((p) => ({ ...p, c: cleanSegment(p.text) }))
       for (let i = 1; i < segs.length; i++) {
         const a = segs[i - 1].c
         const b = segs[i].c

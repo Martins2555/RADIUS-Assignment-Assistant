@@ -5,7 +5,8 @@ import { finalizeDrawings, drawingBlock, checkSpec } from '../src/drawingExtract
 import { parseLoose } from '../src/jsonLoose.js'
 import { checkGraph, reconcileValues, requiredPlots, placePlots } from '../src/graphCheck.js'
 import { getUserFromToken } from './_auth.js'
-import { verifiedFacts, auditArithmetic, arithmeticNote } from './_mathGuard.js'
+import { verifiedFacts, auditArithmetic, arithmeticNote, imageCheckNote } from './_mathGuard.js'
+import { transcribeQuestion } from './_transcribe.js'
 import { buildVisionMessages } from './_vision.js'
 
 // Uses the anon/publishable key — same key already used successfully by the
@@ -780,6 +781,7 @@ MATH FORMATTING RULES (calculative mode). Follow this layout for every worked so
 - Start with a short "Given" line or list (the known values with units) and a one line "Find" when it helps. Then number the steps: "### Step 1: Short title", "### Step 2: Short title" and so on.
 - Under each step write ONE short plain sentence saying what is being done and why, then the working. Never put the sentence and the equations in the same line, and never write several equations in one paragraph.
 - Every equation goes in its own display block, written as $$ ... $$ with the two $$ lines on their own lines and a blank line before and after. Never use single $ for a line of working, use single $ only for a symbol or number inside a sentence.
+- NUMBER ACCURACY: never round a value while you are still working. Carry at least 5 significant figures through every step and round only the final answer. Work out square roots and powers digit by digit (for example sqrt(0.00025) = 0.015811, not 0.016, and (0.2259)^0.4 needs a real calculation), and write the unrounded number. If a VERIFIED RESULTS block is given, use its numbers exactly. Before the final answer, put the result back into the original equation and confirm it reproduces the given value (for example Q); if it does not match within 0.5%, find the slip and redo that step. Always give every quantity the question asks for (for an optimum channel section that means depth, bottom width and top width).
 - Show the working in this order, each part on its own line: the formula in symbols, then the substitution with numbers, then the result. Whenever an expression is set equal to a new expression, start a new line. For a chain, use \\begin{aligned} A &= B \\\\ &= C \\\\ &= D \\end{aligned} with the equals signs lined up, never A = B = C = D on one line.
 - Always write units with numbers, using \\text{ kN}, \\text{ m}, \\text{ V} and so on, and write fractions with \\frac{numerator}{denominator}, never as a slash.
 - Put each final answer in its own display block as \\boxed{R_B = 13.75 \\text{ kN}}, with direction or sign when it matters. End with a "### Final Answer" section that lists every boxed result once, each on its own line.
@@ -923,6 +925,14 @@ ${closingLine}`
     .split(',')
     .map((m) => m.trim())
     .filter(Boolean)
+
+  // Photo questions: read the question text from the photo in a separate small call that runs
+  // alongside the main answer. After the answer is written, its numbers are checked against
+  // the exact calculator results. Only for worked (calculative) questions with no typed numbers.
+  const transcribePromise =
+    ['chat', 'pastq'].includes(effTool) && mode === 'calculative' && !factsBlock && hasFiles && geminiKey && !isContinuation
+      ? transcribeQuestion({ apiKey: geminiKey, models: ['gemini-3.5-flash-lite', ...GEMINI_MODELS.filter((m) => m !== 'gemini-3.5-flash-lite')], parts: currentParts })
+      : null
 
   // Long questions (a few pages of text or several photos) need a longer answer than the normal limit.
   // The bigger limit is only a ceiling: short answers still stop as soon as they are finished, so
@@ -1474,6 +1484,20 @@ ${closingLine}`
           trail.push(`graph-values:${rec.changes.length} fixed`)
         }
       } catch (e) { console.error('Graph check failed:', e?.message) }
+    }
+
+    // Photo questions: compare the answer with the exact results worked out from the question text
+    // read off the photo. The reading started when the answer started, so it is normally done already.
+    if (transcribePromise) {
+      try {
+        const wait = Math.max(0, Math.min(6000, DEADLINE - Date.now() - 4000))
+        const tr = await Promise.race([transcribePromise, new Promise((r) => setTimeout(() => r(''), wait))])
+        const note = tr ? imageCheckNote(text, tr) : ''
+        if (note) {
+          text += note
+          trail.push('image-check:mismatch')
+        }
+      } catch (e) { console.error('Image check failed:', e?.message) }
     }
 
     // Re-add the plain number lines of a worked solution (code only, no AI call). If one does not
